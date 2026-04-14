@@ -1,50 +1,44 @@
 import torch
-import pandas as pd
-from modules.detection import load_model, predict
-from modules.localization import generate_all_heatmaps, save_heatmap
+import numpy as np
+from PIL import Image
+from modules.detection import build_model, TRANSFORM, PATHOLOGIES
+from modules.localization import generate_heatmap
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model  = load_model("models/densenet121_best.pth", device=device)
+# Load model
+MODEL_PATH = "models/combined_densenet121_best.pth"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-test_df = pd.read_csv("data/test_split.csv")
+model = build_model("densenet121")
+model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+model = model.to(DEVICE)
+model.eval()
 
-col_map = {
-    "pneumonia":        "Pneumonia",
-    "cardiomegaly":     "Cardiomegaly",
-    "pleural_effusion": "Pleural Effusion",
-    "pneumothorax":     "Pneumothorax",
-    "atelectasis":      "Atelectasis",
-    "lung_mass":        "Lung Lesion"
-}
+# Load a test image — use any image from your dataset
+TEST_IMAGE = r"D:\Projek\MedStep\data\CheXpert-v1.0-small\train\patient21923\study2\view1_frontal.jpg"
 
-print("Testing one confirmed positive case per pathology...\n")
+img = Image.open(TEST_IMAGE).convert("RGB")
+img_resized = img.resize((224, 224))
+original_array = np.array(img_resized).astype(np.float32) / 255.0
 
-for internal, csv_col in col_map.items():
-    # Find first test image confirmed positive for this pathology
-    positive_cases = test_df[test_df[csv_col] == 1]
-    if len(positive_cases) == 0:
-        print(f"{internal}: no positive cases in test set")
-        continue
+image_tensor = TRANSFORM(img).unsqueeze(0).to(DEVICE)
 
-    test_img = "data/" + positive_cases.iloc[0]["Path"]
-    print(f"── {internal} ──────────────────────────")
-    print(f"   Image: {test_img}")
+# Test heatmap for pathology index 0 (pneumonia)
+print("Generating heatmap...")
+heatmap_array, base64_str = generate_heatmap(
+    model, image_tensor, 
+    pathology_index=2,  # pleural_effusion — most common, likely to activate
+    original_image_array=original_array,
+    model_name="densenet121"
+)
 
-    results  = predict(model, test_img, device=device, threshold=0.1)
-    heatmaps = generate_all_heatmaps(
-        model, test_img, results, device=device, threshold=0.1
-    )
+print(f"Heatmap shape: {heatmap_array.shape}")
+print(f"Base64 length: {len(base64_str)}")
+print("✓ Grad-CAM working")
 
-    # Save heatmap for this pathology if generated
-    if internal in heatmaps:
-        out = f"outputs/heatmap_{internal}.png"
-        save_heatmap(heatmaps[internal]["heatmap"], out)
-        print(f"   Saved: {out}")
-        print(f"   Score: {heatmaps[internal]['score']:.3f} "
-              f"[{heatmaps[internal]['quality']}]")
-    else:
-        print(f"   No heatmap generated "
-              f"(prob={results[internal]['probability']:.3f})")
-    print()
-
-print("Done. Check outputs/ folder for all heatmaps.")
+# Save output to verify visually
+from PIL import Image
+import base64, io
+img_bytes = base64.b64decode(base64_str)
+result_img = Image.open(io.BytesIO(img_bytes))
+result_img.save("test_heatmap_output.png")
+print("Saved → test_heatmap_output.png")

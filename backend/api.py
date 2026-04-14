@@ -1,386 +1,136 @@
 import os
 import sys
-import json
-import uuid
-import shutil
 import torch
-from pathlib import Path
-from fastapi import (
-    FastAPI, UploadFile, File,
-    HTTPException, Depends, Header
-)
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+import numpy as np
+import uvicorn
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
+from PIL import Image
+import io
 
-# Add project root to path
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database.db import init_db
-from auth.auth import (
-    register_user, login_user,
-    verify_session, logout_user, get_user_by_id
-)
-from database.history import save_history, get_user_history, get_history_by_id
-from modules.detection import load_model, predict, PATHOLOGIES
-from modules.localization import (
-    generate_all_heatmaps, heatmap_to_base64
-)
-from modules.retrieval import load_faiss_index, retrieve_similar
-from modules.explanation import generate_explanation
-from fastapi.responses import FileResponse
+from modules.detection import build_model, PATHOLOGIES, TRANSFORM
+from modules.localization import generate_all_heatmaps
+from modules.retrieval import load_retrieval_system, retrieve
+from modules.explanation import generate_report
 
-# ── App setup ─────────────────────────────────────────────────────────────────
+# ─── CONFIG ───────────────────────────────────────────────────────────────────
+MODEL_PATH  = "models/combined_densenet121_best.pth"
+MODEL_NAME  = "densenet121"
+DEVICE      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# ──────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(
-    title       = "MedStep API",
-    description = "AI-assisted chest X-ray interpretation for medical students",
-    version     = "1.0.0"
-)
+app = FastAPI(title="MedStep API", version="1.1.1")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins     = ["*"],
-    allow_credentials = True,
-    allow_methods     = ["*"],
-    allow_headers     = ["*"]
-)
+# Load all models at startup — once only
+print("Loading detection model...")
+detection_model = build_model(MODEL_NAME)
+detection_model.load_state_dict(
+    torch.load(MODEL_PATH, map_location=DEVICE))
+detection_model = detection_model.to(DEVICE)
+detection_model.eval()
 
-# ── Global state ──────────────────────────────────────────────────────────────
+print("Loading retrieval system...")
+faiss_index, metadata, embedder = load_retrieval_system()
 
-DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL      = None
-FAISS_IDX  = None
-FAISS_META = None
-UPLOAD_DIR = "uploads"
+print("All models loaded. API ready.")
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-
-# ── Startup ───────────────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup():
-    global MODEL, FAISS_IDX, FAISS_META
-
-    print(f"Starting MedStep API on device: {DEVICE}")
-
-    # Init database
-    init_db()
-
-    # Load model
-    MODEL = load_model("models/densenet121_best.pth", device=DEVICE)
-    print("Model loaded")
-
-    # Load FAISS index
-    FAISS_IDX, FAISS_META = load_faiss_index("faiss_index")
-    print("FAISS index loaded")
-
-    print("MedStep API ready")
-
-
-# ── Pydantic schemas ──────────────────────────────────────────────────────────
-
-class RegisterRequest(BaseModel):
-    username: str
-    email:    str
-    password: str
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-# ── Auth dependency ───────────────────────────────────────────────────────────
-
-def get_current_user(authorization: str = Header(None)):
-    """Dependency — extract and verify session token from header."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="No token provided")
-
-    # Strip "Bearer " prefix if present
-    token = authorization.replace("Bearer ", "").strip()
-
-    valid, user_id = verify_session(token)
-    if not valid:
-        raise HTTPException(
-            status_code=401, detail="Invalid or expired session"
-        )
-    return user_id
-
-
-# ── Health check ──────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
-    return {
-        "status":  "running",
-        "device":  DEVICE,
-        "model":   "densenet121",
-        "version": "1.0.0"
-    }
+    return {"message": "MedStep API", "version": "1.1.1", "status": "running"}
 
 
 @app.get("/health")
 def health():
     return {
-        "status":       "ok",
-        "model_loaded": MODEL is not None,
-        "faiss_loaded": FAISS_IDX is not None,
-        "device":       DEVICE
+        "status":       "healthy",
+        "model":        MODEL_NAME,
+        "model_loaded": detection_model is not None,
+        "faiss_vectors": faiss_index.ntotal,
+        "device":       str(DEVICE)
     }
 
 
-# ── Auth routes ───────────────────────────────────────────────────────────────
-
-@app.post("/auth/register")
-def register(req: RegisterRequest):
-    ok, msg = register_user(req.username, req.email, req.password)
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
-    return {"success": True, "message": msg}
-
-
-@app.post("/auth/login")
-def login(req: LoginRequest):
-    ok, result = login_user(req.username, req.password)
-    if not ok:
-        raise HTTPException(status_code=401, detail=result)
-    return {"success": True, "token": result}
-
-
-@app.post("/auth/logout")
-def logout(user_id: int = Depends(get_current_user),
-           authorization: str = Header(None)):
-    token = authorization.replace("Bearer ", "").strip()
-    logout_user(token)
-    return {"success": True, "message": "Logged out"}
-
-
-@app.get("/auth/me")
-def me(user_id: int = Depends(get_current_user)):
-    user = get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-
-# ── Analysis route ────────────────────────────────────────────────────────────
-
 @app.post("/analyze")
-async def analyze(
-    file:    UploadFile = File(...),
-    user_id: int        = Depends(get_current_user)
-):
+async def analyze(file: UploadFile = File(...)):
+    """Main pipeline endpoint.
+    Accepts a chest X-ray image and returns:
+    - detections: per-pathology probabilities
+    - heatmaps: base64 encoded heatmaps per detected pathology
+    - similar_cases: top-3 FAISS results
+    - report: findings + impression from Groq
     """
-    Main analysis endpoint.
-    Accepts chest X-ray image, returns full analysis.
-    """
-    # ── Validate file ─────────────────────────────────────────
-    allowed = {".jpg", ".jpeg", ".png"}
-    ext     = Path(file.filename).suffix.lower()
-    if ext not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File type {ext} not allowed. Use JPG or PNG."
-        )
-
-    if file.size and file.size > 10 * 1024 * 1024:  # 10MB
-        raise HTTPException(
-            status_code=400,
-            detail="File too large. Maximum 10MB."
-        )
-
-    # ── Save uploaded file ────────────────────────────────────
-    file_id   = str(uuid.uuid4())
-    file_path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
-
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
+    # --- Load and preprocess image ---
     try:
-        # ── Step 1: Detection ─────────────────────────────────
-        print(f"Analyzing {file_path}...")
-        detection_results = predict(
-            MODEL, file_path, device=DEVICE, threshold=0.3
-        )
-
-        detected_pathologies = [
-            k for k, v in detection_results.items()
-            if v["detected"]
-        ]
-        print(f"  Detected: {detected_pathologies}")
-
-        # ── Step 2: Grad-CAM ──────────────────────────────────
-        heatmaps = generate_all_heatmaps(
-            MODEL, file_path, detection_results,
-            device=DEVICE, threshold=0.3
-        )
-
-        # Convert heatmaps to base64 for JSON response
-        heatmaps_b64 = {}
-        best_heatmap_pil = None
-        best_score       = 0.0
-
-        for pathology, data in heatmaps.items():
-            heatmaps_b64[pathology] = {
-                "image":   heatmap_to_base64(data["heatmap"]),
-                "score":   data["score"],
-                "quality": data["quality"]
-            }
-            if data["score"] > best_score:
-                best_score       = data["score"]
-                best_heatmap_pil = data["heatmap"]
-
-        # ── Step 3: FAISS retrieval ───────────────────────────
-        similar_cases = retrieve_similar(
-            MODEL, file_path, FAISS_IDX, FAISS_META,
-            top_k=3, device=DEVICE
-        )
-
-        # Clean up similar cases for JSON
-        similar_clean = []
-        for case in similar_cases:
-            positive_labels = [
-                k for k, v in case["labels"].items() if v == 1
-            ]
-            similar_clean.append({
-                "rank":       case["rank"],
-                "labels":     positive_labels,
-                "path":       case["path"],
-                "similarity": round(case["similarity"], 3)
-            })
-
-        # ── Step 4: Explanation ───────────────────────────────
-        explanation = generate_explanation(
-            image_path        = file_path,
-            detection_results = detection_results,
-            heatmap_pil       = best_heatmap_pil,
-            threshold         = 0.3
-        )
-
-        # ── Step 5: Save to history ───────────────────────────
-        history_id = save_history(
-            user_id           = user_id,
-            image_path        = file_path,
-            detection_results = detection_results,
-            findings          = explanation.get("findings", ""),
-            impression        = explanation.get("impression", ""),
-            full_report       = explanation.get("full_report", "")
-        )
-
-        # ── Build response ────────────────────────────────────
-        return JSONResponse({
-            "success":    True,
-            "history_id": history_id,
-            "detection":  detection_results,
-            "detected":   detected_pathologies,
-            "heatmaps":   heatmaps_b64,
-            "similar_cases": similar_clean,
-            "explanation": {
-                "findings":    explanation.get("findings", ""),
-                "impression":  explanation.get("impression", ""),
-                "full_report": explanation.get("full_report", "")
-            }
-        })
-
+        contents = await file.read()
+        img = Image.open(io.BytesIO(contents)).convert("RGB")
     except Exception as e:
-        # Clean up uploaded file on error
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
+    # Resize for display and processing
+    img_resized = img.resize((224, 224))
+    original_array = np.array(img_resized).astype(np.float32) / 255.0
 
-# ── History routes ────────────────────────────────────────────────────────────
+    # Preprocess for model
+    image_tensor = TRANSFORM(img).unsqueeze(0).to(DEVICE)
 
-@app.get("/history")
-def history(user_id: int = Depends(get_current_user)):
-    """Get analysis history for current user."""
-    entries = get_user_history(user_id, limit=20)
-    return {"success": True, "history": entries}
+    # TODO: Step 1 — Run detection
+    # pass image_tensor through detection_model
+    # apply sigmoid to get probabilities
+    # build detections dict {pathology: float probability}
+    # Hint: zip(PATHOLOGIES, probs[0].tolist())
+    with torch.no_grad():
+        outputs = detection_model(image_tensor)
+        probs = torch.sigmoid(outputs).cpu().numpy()
 
+    detections = {
+        p: round(float(prob), 4)
+        for p, prob in zip(PATHOLOGIES, probs[0].tolist())
+    }
 
-@app.get("/history/{history_id}")
-def history_detail(
-    history_id: int,
-    user_id:    int = Depends(get_current_user)
-):
-    """Get single history entry."""
-    entry = get_history_by_id(history_id, user_id)
-    if not entry:
-        raise HTTPException(
-            status_code=404,
-            detail="History entry not found"
-        )
-    return {"success": True, "entry": entry}
+    # TODO: Step 2 — Generate heatmaps
+    # call generate_all_heatmaps with detection_model, image_tensor,
+    # detections dict, original_array, MODEL_NAME
+    heatmaps = generate_all_heatmaps(
+        detection_model, image_tensor,
+        detections, original_array, MODEL_NAME
+    )
 
-@app.post("/history/{history_id}/delete")
-def delete_history(
-    history_id: int,
-    user_id:    int = Depends(get_current_user)
-):
-    """Delete a history entry. Users can only delete their own."""
-    from database.db import get_session, History as HistoryModel
+    # TODO: Step 3 — Retrieve similar cases
+    # call retrieve with image_tensor, faiss_index, metadata, embedder
+    similar_cases = retrieve(image_tensor, faiss_index, metadata, embedder)
 
-    db = get_session()
-    try:
-        entry = db.query(HistoryModel).filter_by(
-            history_id = history_id,
-            user_id    = user_id
-        ).first()
+    # TODO: Step 4 — Save image temporarily for Groq
+    # save img to a temp file in uploads/ folder
+    # call generate_report with temp path and detections
+    # hint: use img.save(temp_path)
+    os.makedirs("uploads", exist_ok=True)
+    temp_path = f"uploads/temp_{file.filename}"
+    img.save(temp_path)
+    report = generate_report(temp_path, detections)
 
-        if not entry:
-            raise HTTPException(
-                status_code = 404,
-                detail      = "History entry not found"
-            )
-
-        # Clean up uploaded image file if it exists
-        if entry.image_path and os.path.exists(entry.image_path):
-            try:
-                os.remove(entry.image_path)
-            except Exception:
-                pass  # Don't fail if file already gone
-
-        db.delete(entry)
-        db.commit()
-        return {"success": True, "message": "Entry deleted"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
+    # TODO: Step 5 — Return JSON response
+    # return all results as dict
+    return JSONResponse(content={
+        "detections":    detections,
+        "heatmaps":      heatmaps,
+        "similar_cases": similar_cases,
+        "report":        report
+    })
 
 @app.get("/image")
-def serve_image(path: str, user_id: int = Depends(get_current_user)):
-    """Serve a training image by path for similar case display."""
-    # Security: only allow paths within the data directory
+def serve_image(path: str):
+    """Serve training images for similar cases display."""
+    # TODO: construct full path from BASE_PATH + path
+    # check if file exists
+    # return FileResponse
     full_path = os.path.join("data", path)
-    full_path = os.path.normpath(full_path)
-
-    # Prevent path traversal attacks
-    if not full_path.startswith(os.path.normpath("data")):
-        raise HTTPException(status_code=403, detail="Access denied")
-
     if not os.path.exists(full_path):
         raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(full_path)
 
-    return FileResponse(full_path, media_type="image/jpeg")
-
-# ── Run ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "backend.api:app",
-        host     = "0.0.0.0",
-        port     = 8000,
-        reload   = False
-    )
+    uvicorn.run("backend.api:app", host="0.0.0.0", port=8000, reload=False)

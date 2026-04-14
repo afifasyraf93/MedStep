@@ -1,195 +1,95 @@
-import os
-import json
-import torch
-import numpy as np
 import faiss
-import pandas as pd
+import json
+import numpy as np
+import torch
+import torch.nn as nn
 from PIL import Image
-from modules.detection import TRANSFORM, PATHOLOGIES
+
+from modules.detection import build_model, PATHOLOGIES, TRANSFORM
+
+# ─── CONFIG ───────────────────────────────────────────────────────────────────
+INDEX_PATH  = "faiss_index/index.faiss"
+META_PATH   = "faiss_index/metadata.json"
+MODEL_PATH  = "models/combined_densenet121_best.pth"
+MODEL_NAME  = "densenet121"
+DEVICE      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+TOP_K       = 3
+# ──────────────────────────────────────────────────────────────────────────────
 
 
-def extract_embedding(model, image_path, device="cuda"):
-    """
-    Extract 1024-dim embedding from DenseNet121 global average pooling layer.
-    This is the feature vector before the classifier head.
-    """
-    img    = Image.open(image_path).convert("RGB")
-    tensor = TRANSFORM(img).unsqueeze(0).to(device)
+class DenseNetEmbedder(nn.Module):
+    """Same embedder as build_faiss_index.py — extracts 1024-dim vectors."""
+    def __init__(self, densenet):
+        super().__init__()
+        self.features = densenet.features
+        self.pool     = nn.AdaptiveAvgPool2d((1, 1))
 
-    with torch.no_grad():
-        # Extract features before classifier
-        features = model.features(tensor)
-        # Global average pooling → (1, 1024)
-        out = torch.nn.functional.relu(features, inplace=True)
-        out = torch.nn.functional.adaptive_avg_pool2d(out, (1, 1))
-        embedding = torch.flatten(out, 1).cpu().numpy()[0]  # (1024,)
-
-    return embedding.astype(np.float32)
+    def forward(self, x):
+        x = self.features(x)
+        x = torch.nn.functional.relu(x)
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        return x
 
 
-def build_faiss_index(model, csv_path, base_path="data",
-                      index_dir="faiss_index", device="cuda"):
-    """
-    Build FAISS index from all training images.
-    Saves index + metadata to disk.
-
-    Args:
-        model:      loaded DenseNet121 model
-        csv_path:   path to train_split.csv
-        base_path:  base data directory
-        index_dir:  where to save index files
-        device:     cuda or cpu
-    """
-    os.makedirs(index_dir, exist_ok=True)
-
-    df = pd.read_csv(csv_path).reset_index(drop=True)
-    print(f"Building FAISS index from {len(df)} images...")
-
-    model.eval()
-    embeddings = []
-    metadata   = []
-    failed     = 0
-
-    for i, row in df.iterrows():
-        img_path = os.path.join(base_path, row["Path"])
-
-        if not os.path.exists(img_path):
-            failed += 1
-            continue
-
-        try:
-            emb = extract_embedding(model, img_path, device)
-            embeddings.append(emb)
-
-            # Store metadata for retrieval
-            meta = {
-                "index":     len(embeddings) - 1,
-                "path":      row["Path"],
-                "full_path": img_path,
-                "labels":    {}
-            }
-
-            # Store pathology labels
-            col_map = {
-                "pneumonia":        "Pneumonia",
-                "cardiomegaly":     "Cardiomegaly",
-                "pleural_effusion": "Pleural Effusion",
-                "pneumothorax":     "Pneumothorax",
-                "atelectasis":      "Atelectasis",
-                "lung_mass":        "Lung Lesion"
-            }
-            for internal, csv_col in col_map.items():
-                if csv_col in row:
-                    meta["labels"][internal] = int(row[csv_col])
-
-            metadata.append(meta)
-
-        except Exception as e:
-            failed += 1
-            if failed <= 5:
-                print(f"  WARNING: Failed on {img_path}: {e}")
-
-        # Progress every 500 images
-        if (i + 1) % 500 == 0:
-            print(f"  Processed {i+1}/{len(df)} images "
-                  f"({len(embeddings)} embedded, {failed} failed)")
-
-    print(f"\nEmbedding complete: {len(embeddings)} images, "
-          f"{failed} failed")
-
-    # Build FAISS index
-    dim   = 1024
-    index = faiss.IndexFlatL2(dim)  # L2 distance
-
-    # Normalize embeddings for better similarity search
-    emb_array = np.array(embeddings, dtype=np.float32)
-    faiss.normalize_L2(emb_array)
-    index.add(emb_array)
-
-    print(f"FAISS index built: {index.ntotal} vectors, dim={dim}")
-
-    # Save index and metadata
-    index_path    = os.path.join(index_dir, "index.faiss")
-    metadata_path = os.path.join(index_dir, "metadata.json")
-
-    faiss.write_index(index, index_path)
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f)
-
-    print(f"Saved index    → {index_path}")
-    print(f"Saved metadata → {metadata_path}")
-
-    return index, metadata
-
-
-def load_faiss_index(index_dir="faiss_index"):
-    """Load FAISS index and metadata from disk."""
-    index_path    = os.path.join(index_dir, "index.faiss")
-    metadata_path = os.path.join(index_dir, "metadata.json")
-
-    if not os.path.exists(index_path):
-        raise FileNotFoundError(
-            f"FAISS index not found at {index_path}. "
-            f"Run build_faiss_index.py first."
-        )
-
-    index = faiss.read_index(index_path)
-    with open(metadata_path, "r") as f:
+def load_retrieval_system():
+    """Load FAISS index, metadata and embedder. Call once at startup."""
+    # TODO: load faiss index using faiss.read_index
+    # TODO: load metadata from META_PATH as JSON
+    # TODO: build embedder same way as build_faiss_index.py
+    #       load model weights, wrap in DenseNetEmbedder, set eval
+    # return index, metadata, embedder
+    index    = faiss.read_index(INDEX_PATH)
+    with open(META_PATH) as f:
         metadata = json.load(f)
 
-    print(f"FAISS index loaded: {index.ntotal} vectors")
-    return index, metadata
+    model = build_model(MODEL_NAME)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    model = model.to(DEVICE)
+    model.eval()
+    embedder = DenseNetEmbedder(model).to(DEVICE)
+    embedder.eval()
+
+    return index, metadata, embedder
 
 
-def retrieve_similar(model, image_path, index, metadata,
-                     top_k=3, device="cuda"):
-    """
-    Retrieve top-k similar cases for a query image.
+def retrieve(image_tensor, index, metadata, embedder, top_k=TOP_K):
+    """Retrieve top-k similar cases for a query image.
 
     Args:
-        model:      loaded model
-        image_path: path to query image
-        index:      loaded FAISS index
-        metadata:   loaded metadata list
-        top_k:      number of similar cases to return
-        device:     cuda or cpu
+        image_tensor: preprocessed tensor [1, 3, 224, 224]
+        index: loaded FAISS index
+        metadata: loaded metadata list
+        embedder: DenseNetEmbedder model
+        top_k: number of results to return
 
     Returns:
         list of dicts with keys:
-            path, labels, similarity_score, rank
+        {
+            "rank": 1,
+            "path": "path/to/image.jpg",
+            "labels": {"pneumonia": 0, "cardiomegaly": 1, ...},
+            "distance": 12.34
+        }
     """
-    # Extract query embedding
-    query_emb = extract_embedding(model, image_path, device)
-    query_emb = query_emb.reshape(1, -1).astype(np.float32)
-    faiss.normalize_L2(query_emb)
+    # TODO: extract embedding from image_tensor
+    # move to cpu, convert to numpy float32, shape [1, 1024]
+    # search index for top_k nearest neighbours
+    # distances, indices = index.search(...)
+    # build results list from metadata using indices
+    with torch.no_grad():
+        embedding = embedder(image_tensor.to(DEVICE))
+        embedding = embedding.cpu().numpy().astype(np.float32)
 
-    # Search index
-    distances, indices = index.search(query_emb, top_k + 1)
-    # +1 because the query itself might be in the index
+    distances, indices = index.search(embedding, top_k)
 
     results = []
-    for rank, (dist, idx) in enumerate(
-        zip(distances[0], indices[0])
-    ):
-        if idx == -1:  # FAISS returns -1 for empty slots
-            continue
-
-        meta = metadata[idx]
-
-        # Convert L2 distance to similarity score (0-1)
-        # Lower L2 = more similar, so invert
-        similarity = float(1 / (1 + dist))
-
+    for rank, (dist, idx) in enumerate(zip(distances[0], indices[0])):
+        entry = metadata[idx]
         results.append({
-            "rank":       rank + 1,
-            "path":       meta["path"],
-            "full_path":  meta["full_path"],
-            "labels":     meta["labels"],
-            "similarity": similarity,
-            "distance":   float(dist)
+            "rank":     rank + 1,
+            "path":     entry["path"],
+            "labels":   entry["labels"],
+            "distance": round(float(dist), 4)
         })
-
-        if len(results) >= top_k:
-            break
-
     return results

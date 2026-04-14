@@ -1,156 +1,145 @@
 import cv2
-import torch
 import numpy as np
+import torch
+import base64
 from PIL import Image
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-from modules.detection import TRANSFORM, PATHOLOGIES
+import matplotlib.pyplot as plt
+import io
+
+from modules.detection import build_model, PATHOLOGIES, TRANSFORM
 
 
-def get_target_layer(model):
+def get_target_layer(model, model_name="densenet121"):
+    """Return the target layer for Grad-CAM based on model architecture."""
+    if model_name == "densenet121":
+        return [model.features.denseblock4]
+    elif model_name == "resnet50":
+        return [model.layer4[-1]]
+    elif model_name == "efficientnet_b0":
+        return [model.features[-1]]
+    elif model_name == "mobilenet_v3":
+        return [model.features[-1]]
+    else:
+        raise ValueError(f"Unknown model: {model_name}")
+
+
+def apply_intensity_threshold(heatmap, percentile=70):
+    """Zero out activations below the given percentile.
+    Only keep the top (100 - percentile)% of activations.
     """
-    Return the target layer for Grad-CAM.
-    For DenseNet121, the last conv layer is features.denseblock4
+    # TODO: compute the threshold value at the given percentile
+    # set all values below threshold to 0
+    # return the masked heatmap
+    threshold = np.percentile(heatmap, percentile)
+    heatmap = np.where(heatmap >= threshold, heatmap, 0)
+    return heatmap
+
+
+def apply_lung_mask(heatmap, original_gray):
+    """Use Otsu thresholding on the X-ray to create a lung region mask.
+    Zero out heatmap activations outside the detected chest region.
     """
-    return [model.features.denseblock4.denselayer16.conv2]
+    # TODO:
+    # 1. Convert original_gray to uint8 (0-255)
+    # 2. Apply Otsu threshold: cv2.threshold with cv2.THRESH_OTSU
+    # 3. Apply morphological operations to clean up the mask
+    #    - cv2.morphologyEx with cv2.MORPH_CLOSE to fill holes
+    #    - cv2.dilate to expand slightly
+    # 4. Multiply heatmap by (mask / 255) to zero out outside regions
+    # 5. Return masked heatmap
+    gray_uint8 = (original_gray * 255).astype(np.uint8)
+    _, mask = cv2.threshold(gray_uint8, 0, 255, 
+                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    kernel = np.ones((15, 15), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.dilate(mask, kernel, iterations=1)
+    heatmap = heatmap * (mask / 255.0)
+    return heatmap
 
 
-def generate_heatmap(model, image_path, pathology, device="cuda"):
-    """
-    Generate Grad-CAM heatmap for a specific pathology.
-
+def generate_heatmap(model, image_tensor, pathology_index, 
+                     original_image_array, model_name="densenet121"):
+    """Generate a Grad-CAM heatmap for a specific pathology.
+    
     Args:
-        model:        loaded DenseNet121 model in eval mode
-        image_path:   path to chest X-ray image
-        pathology:    string name e.g. "pneumonia"
-        device:       "cuda" or "cpu"
-
+        model: loaded PyTorch model
+        image_tensor: preprocessed image tensor [1, 3, 224, 224]
+        pathology_index: index of target pathology (0-5)
+        original_image_array: numpy array of original image, shape [224, 224, 3], 
+                               values 0-1 float32
+        model_name: which architecture to use for target layer
+    
     Returns:
-        heatmap_overlay: PIL Image with heatmap overlaid on original
-        heatmap_raw:     numpy array of raw heatmap (0-1)
-        cam_score:       float, mean activation score
+        heatmap_array: numpy array of final heatmap [224, 224, 3]
+        base64_str: base64 encoded side-by-side PNG
     """
-    # Get pathology index
-    if pathology not in PATHOLOGIES:
-        raise ValueError(f"Unknown pathology: {pathology}. "
-                         f"Must be one of {PATHOLOGIES}")
-    class_idx = PATHOLOGIES.index(pathology)
+    target_layers = get_target_layer(model, model_name)
 
-    # Load and preprocess image
-    orig_image = Image.open(image_path).convert("RGB")
-    orig_array = np.array(orig_image.resize((224, 224))) / 255.0
-    orig_array = orig_array.astype(np.float32)
+    # Grad-CAM target — focus on specific pathology output
+    from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
-    input_tensor = TRANSFORM(orig_image).unsqueeze(0).to(device)
+    targets = [ClassifierOutputTarget(pathology_index)]
 
-    # Handle DenseNet classifier wrapper
-    # pytorch-grad-cam needs the model to output raw logits
-    target_layers = get_target_layer(model)
-    targets       = [ClassifierOutputTarget(class_idx)]
-
-    # Generate CAM
+    # Generate raw Grad-CAM
     with GradCAM(model=model, target_layers=target_layers) as cam:
-        grayscale_cam = cam(
-            input_tensor=input_tensor,
-            targets=targets
-        )[0]  # shape: (224, 224)
+        grayscale_cam = cam(input_tensor=image_tensor, targets=targets)
+        grayscale_cam = grayscale_cam[0]  # shape [224, 224]
+
+    # TODO: call apply_intensity_threshold on grayscale_cam
+    # TODO: get grayscale version of original for lung mask
+    #       Hint: convert original_image_array to grayscale
+    #       np.mean(original_image_array, axis=2) gives grayscale
+    # TODO: call apply_lung_mask with grayscale_cam and the grayscale image
+    grayscale_cam = apply_intensity_threshold(grayscale_cam, percentile=70)
+    original_gray = np.mean(original_image_array, axis=2)
+    grayscale_cam = apply_lung_mask(grayscale_cam, original_gray)
 
     # Overlay heatmap on original image
-    overlay = show_cam_on_image(
-        orig_array,
-        grayscale_cam,
-        use_rgb=True,
-        image_weight=0.6   # 60% original, 40% heatmap
-    )
+    heatmap_overlay = show_cam_on_image(
+        original_image_array, grayscale_cam, use_rgb=True)
 
-    heatmap_pil = Image.fromarray(overlay)
-    cam_score   = float(grayscale_cam.mean())
+    # TODO: create side by side image
+    # Convert original_image_array to uint8 (multiply by 255)
+    # Stack original and heatmap_overlay side by side using np.hstack
+    # Add a title/label — use matplotlib to add text "Original" and "Heatmap"
+    original_uint8 = (original_image_array * 255).astype(np.uint8)
+    side_by_side = np.hstack([original_uint8, heatmap_overlay])
 
-    return heatmap_pil, grayscale_cam, cam_score
-
-
-def generate_all_heatmaps(model, image_path, detection_results,
-                           device="cuda", threshold=0.3):
-    """
-    Generate heatmaps for all detected pathologies.
-
-    Args:
-        model:             loaded model
-        image_path:        path to image
-        detection_results: dict from detection.predict()
-        device:            cuda or cpu
-        threshold:         only generate for pathologies above this prob
-
-    Returns:
-        dict: {pathology: {"heatmap": PIL, "score": float}}
-              only includes detected pathologies
-    """
-    results = {}
-
-    for pathology, info in detection_results.items():
-        if info["probability"] >= threshold:
-            try:
-                heatmap, raw_cam, score = generate_heatmap(
-                    model, image_path, pathology, device
-                )
-                results[pathology] = {
-                    "heatmap":  heatmap,
-                    "raw_cam":  raw_cam,
-                    "score":    score,
-                    "prob":     info["probability"]
-                }
-                print(f"  Grad-CAM generated for {pathology} "
-                      f"(prob={info['probability']:.3f}, "
-                      f"score={score:.3f})")
-            except Exception as e:
-                print(f"  WARNING: Grad-CAM failed for "
-                      f"{pathology}: {e}")
-
-    return results
-
-def generate_all_heatmaps(model, image_path, detection_results,
-                           device="cuda", threshold=0.3):
-    results = {}
-
-    for pathology, info in detection_results.items():
-        if info["probability"] >= threshold:
-            try:
-                heatmap, raw_cam, score = generate_heatmap(
-                    model, image_path, pathology, device
-                )
-
-                # Flag low-quality heatmaps
-                quality = "good" if score >= 0.05 else "low"
-
-                results[pathology] = {
-                    "heatmap": heatmap,
-                    "raw_cam": raw_cam,
-                    "score":   score,
-                    "prob":    info["probability"],
-                    "quality": quality
-                }
-                print(f"  Grad-CAM [{quality}] {pathology} "
-                      f"(prob={info['probability']:.3f}, "
-                      f"score={score:.3f})")
-            except Exception as e:
-                print(f"  WARNING: Grad-CAM failed for "
-                      f"{pathology}: {e}")
-
-    return results
-
-def save_heatmap(heatmap_pil, output_path):
-    """Save heatmap PIL image to disk."""
-    import os
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    heatmap_pil.save(output_path)
-    return output_path
-
-def heatmap_to_base64(heatmap_pil):
-    """Convert PIL heatmap to base64 string for API transmission."""
-    import io
-    import base64
+    # TODO: encode final image to base64
+    # Use PIL to save to bytes buffer
+    # Use base64.b64encode to encode
+    img = Image.fromarray(side_by_side)
     buffer = io.BytesIO()
-    heatmap_pil.save(buffer, format="PNG")
-    buffer.seek(0)
-    return base64.b64encode(buffer.read()).decode("utf-8")
+    img.save(buffer, format="PNG")
+    base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    return heatmap_overlay, base64_str
+
+
+def generate_all_heatmaps(model, image_tensor, detections, 
+                           original_image_array, model_name="densenet121"):
+    """Generate heatmaps for all detected pathologies.
+    
+    Args:
+        detections: dict of {pathology_name: probability}
+        threshold: only generate heatmap if probability >= 0.5
+    
+    Returns:
+        dict of {pathology_name: base64_str}
+    """
+    # TODO: iterate over PATHOLOGIES
+    # for each pathology where detections[pathology] >= 0.5
+    # get pathology_index using PATHOLOGIES.index(pathology)
+    # call generate_heatmap and store base64_str in results dict
+    # return results dict
+    results = {}
+    for pathology in PATHOLOGIES:
+        if detections.get(pathology, 0) >= 0.5:
+            idx = PATHOLOGIES.index(pathology)
+            _, base64_str = generate_heatmap(
+                model, image_tensor, idx, 
+                original_image_array, model_name)
+            results[pathology] = base64_str
+    return results

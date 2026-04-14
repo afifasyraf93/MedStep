@@ -1,1 +1,27 @@
+# Model weights
+models/
+
+# FAISS index
+faiss_index/
+
+# Dataset
 data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+
+# API keys
+api.env
+.env
+
+# Uploads and temp files
+uploads/
+test_heatmap_output.png
+
+# Old version
+v1.0.1/

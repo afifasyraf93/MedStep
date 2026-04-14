@@ -1,218 +1,128 @@
 import os
 import base64
 import json
-from io import BytesIO
-from PIL import Image
 from groq import Groq
 from dotenv import load_dotenv
-from modules.detection import PATHOLOGIES
 
 load_dotenv("api.env")
 
-def _encode_image_base64(image_input):
-    """
-    Convert image to base64 string.
-    Accepts PIL Image or file path.
-    """
-    if isinstance(image_input, str):
-        with open(image_input, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
-    elif isinstance(image_input, Image.Image):
-        buffer = BytesIO()
-        image_input.save(buffer, format="PNG")
-        buffer.seek(0)
-        return base64.b64encode(buffer.read()).decode("utf-8")
-    else:
-        raise ValueError("image_input must be a file path or PIL Image")
+# ─── CONFIG ───────────────────────────────────────────────────────────────────
+GROQ_MODEL  = "meta-llama/llama-4-scout-17b-16e-instruct"
+MAX_TOKENS  = 512
+# ──────────────────────────────────────────────────────────────────────────────
+
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-def _format_detection_summary(detection_results, threshold=0.3):
-    """Format detection results into readable text for the prompt."""
-    detected   = []
-    not_detected = []
+def encode_image_to_base64(image_path):
+    """Encode image file to base64 string."""
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
-    for path, info in detection_results.items():
-        prob = info["probability"]
-        if prob >= threshold:
-            detected.append(f"{path.replace('_', ' ')} "
-                            f"({prob:.1%} confidence)")
-        else:
-            not_detected.append(f"{path.replace('_', ' ')} "
-                                 f"({prob:.1%})")
 
-    summary = ""
+def format_detections(detections):
+    """Convert detections dict to readable string for prompt."""
+    # TODO: build a string listing detected pathologies
+    # only include pathologies where probability >= 0.5
+    # format: "Detected: pneumonia (0.92), pleural_effusion (0.78)"
+    # if nothing detected: "No pathologies detected"
+    detected = [
+        f"{p} ({detections[p]:.2f})"
+        for p in detections
+        if detections[p] >= 0.5
+    ]
     if detected:
-        summary += "DETECTED: " + ", ".join(detected)
-    else:
-        summary += "DETECTED: none above threshold"
-
-    summary += "\nNOT DETECTED: " + ", ".join(not_detected)
-    return summary
+        return "Detected: " + ", ".join(detected)
+    return "No pathologies detected"
 
 
-def generate_findings(client, image_b64, detection_summary,
-                       heatmap_b64=None):
-    """
-    First API call — generate radiological findings.
-    Returns findings text.
-    """
-    # Build image content list
-    content = []
+def generate_findings(image_base64, detections_text):
+    """Generate the Findings section of the radiology report."""
+    prompt = f"""You are an AI radiology assistant helping medical students learn.
 
-    # Add original X-ray
-    content.append({
-        "type": "image_url",
-        "image_url": {
-            "url": f"data:image/jpeg;base64,{image_b64}"
-        }
-    })
+    Detection results: {detections_text}
 
-    # Add heatmap if available
-    if heatmap_b64:
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/png;base64,{heatmap_b64}"
-            }
-        })
+    Describe the radiographic findings visible in this chest X-ray in 2-3 sentences.
+    Use proper medical terminology.
+    Focus only on observable features — do NOT state a diagnosis yet.
+    Mention relevant anatomical regions and any visible abnormalities."""
 
-    detection_block = f"""
-AI Detection Results:
-{detection_summary}
-"""
-
-    content.append({
-        "type": "text",
-        "text": f"""You are an experienced radiologist reviewing a 
-chest X-ray for medical education purposes.
-
-{detection_block}
-
-The second image (if provided) is a Grad-CAM heatmap showing which 
-regions the AI focused on. Red/yellow areas indicate high attention.
-
-Please provide FINDINGS only — describe what you observe in the 
-chest X-ray including:
-- Lung fields (any opacities, consolidations, effusions)
-- Heart size and borders
-- Costophrenic angles
-- Any notable abnormalities
-
-Be concise and use standard radiological terminology.
-Write 3-5 sentences maximum.
-Do NOT write an impression yet."""
-    })
-
+    # TODO: call client.chat.completions.create
+    # model=GROQ_MODEL
+    # messages with role "user" containing:
+    #   - image_url content with base64 image
+    #   - text content with prompt
+    # max_tokens=MAX_TOKENS
+    # return response.choices[0].message.content.strip()
     response = client.chat.completions.create(
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        messages=[{"role": "user", "content": content}],
-        max_tokens=300
+        model=GROQ_MODEL,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}"
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+        }],
+        max_tokens=MAX_TOKENS
     )
-
     return response.choices[0].message.content.strip()
 
 
-def generate_impression(client, findings, detection_summary):
-    """
-    Second API call — generate impression based on findings.
-    Text only, no image needed.
-    Returns impression text.
-    """
+def generate_impression(findings_text, detections_text):
+    """Generate the Impression section based on findings."""
+    prompt = f"""You are an AI radiology assistant helping medical students learn.
+
+    Radiographic findings: {findings_text}
+    Detection results: {detections_text}
+
+    Based on the findings above, provide a clinical impression in 2-3 sentences.
+    State the likely diagnosis with supporting evidence from the findings.
+    Use professional medical language appropriate for a radiology report."""
+
+    # TODO: call client.chat.completions.create
+    # text-only this time — no image needed
+    # same model and max_tokens
+    # return response.choices[0].message.content.strip()
     response = client.chat.completions.create(
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
-        messages=[
-            {
-                "role": "user",
-                "content": f"""You are an experienced radiologist 
-writing a radiology report for medical education purposes.
-
-AI Detection Results:
-{detection_summary}
-
-Radiological Findings:
-{findings}
-
-Based on the findings above, write a brief IMPRESSION section only.
-The impression should:
-- Summarize the key findings in 2-3 sentences
-- State the most likely diagnoses
-- Note any recommendations if appropriate
-- Use standard radiological report language
-
-Do NOT repeat the findings. Write the impression only."""
-            }
-        ],
-        max_tokens=200
+        model=GROQ_MODEL,
+        messages=[{
+            "role": "user",
+            "content": prompt
+        }],
+        max_tokens=MAX_TOKENS
     )
-
-    return response.choices[0].message.content.strip()\
-    .replace("IMPRESSION:", "").strip()
+    return response.choices[0].message.content.strip()
 
 
-def generate_explanation(image_path, detection_results,
-                          heatmap_pil=None, threshold=0.3):
-    """
-    Main function — generates full radiological explanation.
+def generate_report(image_path, detections):
+    """Generate complete radiology report with findings and impression.
 
     Args:
-        image_path:        path to chest X-ray
-        detection_results: dict from detection.predict()
-        heatmap_pil:       PIL Image of best heatmap (optional)
-        threshold:         detection threshold
+        image_path: path to the chest X-ray image file
+        detections: dict of {pathology: probability}
 
     Returns:
-        dict with keys:
-            findings, impression, full_report,
-            detection_summary, success
+        dict with keys: "findings", "impression", "detections_text"
     """
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return {
-            "success":    False,
-            "error":      "GROQ_API_KEY not found in .env file",
-            "findings":   "",
-            "impression": "",
-            "full_report": ""
-        }
-
-    client = Groq(api_key=api_key)
-
-    try:
-        # Encode images
-        image_b64   = _encode_image_base64(image_path)
-        heatmap_b64 = None
-        if heatmap_pil is not None:
-            heatmap_b64 = _encode_image_base64(heatmap_pil)
-
-        detection_summary = _format_detection_summary(
-            detection_results, threshold
-        )
-
-        print("  Generating findings...")
-        findings = generate_findings(
-            client, image_b64, detection_summary, heatmap_b64
-        )
-
-        print("  Generating impression...")
-        impression = generate_impression(
-            client, findings, detection_summary
-        )
-
-        full_report = f"FINDINGS:\n{findings}\n\nIMPRESSION:\n{impression}"
-
-        return {
-            "success":            True,
-            "findings":           findings,
-            "impression":         impression,
-            "full_report":        full_report,
-            "detection_summary":  detection_summary
-        }
-
-    except Exception as e:
-        return {
-            "success":    False,
-            "error":      str(e),
-            "findings":   "",
-            "impression": "",
-            "full_report": ""
-        }
+    # TODO: encode image to base64
+    # TODO: format detections to text
+    # TODO: call generate_findings
+    # TODO: call generate_impression using findings result
+    # TODO: return dict with findings, impression, detections_text
+    image_base64     = encode_image_to_base64(image_path)
+    detections_text  = format_detections(detections)
+    findings         = generate_findings(image_base64, detections_text)
+    impression       = generate_impression(findings, detections_text)
+    return {
+        "findings":        findings,
+        "impression":      impression,
+        "detections_text": detections_text
+    }
