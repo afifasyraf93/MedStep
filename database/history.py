@@ -1,107 +1,43 @@
-import json
-from datetime import datetime
-from database.db import get_session, History
+from sqlalchemy.orm import Session
+from database.db import History
 
 
-def save_history(user_id, image_path, detection_results,
-                  findings, impression, full_report):
+def save_history(db: Session, user_id: int, report: str, image_id: str = None):
+    """Create and save a new History row.
+    Return the new History object.
     """
-    Save analysis result to history.
-    Returns history_id or None on failure.
+    # TODO: create History object with user_id, report, image_id
+    history = History(user_id=user_id, report=report, image_id=image_id)
+    # TODO: db.add, db.commit, db.refresh
+    db.add(history)
+    db.commit()
+    db.refresh(history)
+    # TODO: return history
+    return history
+
+
+def get_history(db: Session, user_id: int):
+    """Return all History rows for this user, newest first."""
+    # TODO: query History filtered by user_id
+    history = db.query(History).filter(History.user_id == user_id).first()
+    # TODO: order by timestamp descending — .order_by(History.timestamp.desc())
+    history = history.order_by(History.timestamp.desc())
+    # TODO: return .all()
+    return history.all()
+
+
+def delete_history(db: Session, history_id: int, user_id: int):
+    """Delete a specific history row.
+    Only deletes if it belongs to the requesting user (security check).
+    Return True if deleted, False if not found.
     """
-    db = get_session()
-    try:
-        entry = History(
-            user_id    = user_id,
-            image_path = image_path,
-            report     = full_report,
-            findings   = findings,
-            impression = impression,
-            detections = json.dumps(detection_results),
-            timestamp  = datetime.utcnow()
-        )
-        db.add(entry)
+    # TODO: query History filtered by history_id AND user_id
+    history = db.query(History).filter(History.history_id == history_id, History.user_id== user_id,).first()
+    # TODO: if found, delete and commit, return True
+    if history:
+        db.delete(history)
         db.commit()
-        return entry.history_id
-
-    except Exception as e:
-        db.rollback()
-        print(f"Failed to save history: {e}")
-        return None
-    finally:
-        db.close()
-
-
-def get_user_history(user_id, limit=20):
-    """
-    Get analysis history for a user.
-    Returns list of dicts, most recent first.
-    """
-    db = get_session()
-    try:
-        entries = (
-            db.query(History)
-            .filter_by(user_id=user_id)
-            .order_by(History.timestamp.desc())
-            .limit(limit)
-            .all()
-        )
-
-        results = []
-        for e in entries:
-            try:
-                detections = json.loads(e.detections) \
-                    if e.detections else {}
-            except Exception:
-                detections = {}
-
-            # Get detected pathologies for display
-            detected = [
-                k for k, v in detections.items()
-                if isinstance(v, dict) and v.get("detected")
-            ]
-
-            results.append({
-                "history_id": e.history_id,
-                "timestamp":  e.timestamp.strftime("%Y-%m-%d %H:%M"),
-                "image_path": e.image_path,
-                "findings":   e.findings,
-                "impression": e.impression,
-                "report":     e.report,
-                "detections": detections,
-                "detected":   detected
-            })
-
-        return results
-
-    finally:
-        db.close()
-
-
-def get_history_by_id(history_id, user_id):
-    """
-    Get single history entry.
-    user_id ensures users can only access their own history.
-    """
-    db = get_session()
-    try:
-        entry = db.query(History).filter_by(
-            history_id=history_id,
-            user_id=user_id
-        ).first()
-
-        if not entry:
-            return None
-
-        return {
-            "history_id": entry.history_id,
-            "timestamp":  entry.timestamp.strftime("%Y-%m-%d %H:%M"),
-            "image_path": entry.image_path,
-            "findings":   entry.findings,
-            "impression": entry.impression,
-            "report":     entry.report,
-            "detections": json.loads(entry.detections)
-                          if entry.detections else {}
-        }
-    finally:
-        db.close()
+        return True
+    # TODO: if not found, return False
+    else:
+        return False

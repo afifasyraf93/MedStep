@@ -5,6 +5,7 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi import Request
 from PIL import Image
 import io
 
@@ -14,6 +15,11 @@ from modules.detection import build_model, PATHOLOGIES, TRANSFORM
 from modules.localization import generate_all_heatmaps
 from modules.retrieval import load_retrieval_system, retrieve
 from modules.explanation import generate_report
+from fastapi import Depends, Header
+from database.db import get_db, init_db
+from sqlalchemy.orm import Session
+import auth.auth as auth
+from database.history import save_history, get_history, delete_history
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 MODEL_PATH  = "models/combined_densenet121_best.pth"
@@ -36,6 +42,7 @@ faiss_index, metadata, embedder = load_retrieval_system()
 
 print("All models loaded. API ready.")
 
+init_db()
 
 @app.get("/")
 def root():
@@ -54,7 +61,7 @@ def health():
 
 
 @app.post("/analyze")
-async def analyze(file: UploadFile = File(...)):
+async def analyze(request: Request, db: Session = Depends(get_db), file: UploadFile = File(...)):
     """Main pipeline endpoint.
     Accepts a chest X-ray image and returns:
     - detections: per-pathology probabilities
@@ -111,6 +118,15 @@ async def analyze(file: UploadFile = File(...)):
     img.save(temp_path)
     report = generate_report(temp_path, detections)
 
+    # TODO: save to history if token header present (optional for now)
+    try:
+        token = request.headers.get("token")
+        if token:
+            user_id = auth.verify_session(db, token)
+            save_history(db, user_id=user_id, report=str(report))
+    except Exception:
+        pass
+
     # TODO: Step 5 — Return JSON response
     # return all results as dict
     return JSONResponse(content={
@@ -119,6 +135,7 @@ async def analyze(file: UploadFile = File(...)):
         "similar_cases": similar_cases,
         "report":        report
     })
+
 
 @app.get("/image")
 def serve_image(path: str):
@@ -131,6 +148,72 @@ def serve_image(path: str):
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(full_path)
 
+
+@app.post("/register")
+def register(username: str, email: str, password: str, db: Session = Depends(get_db)):
+    # TODO: call auth.register(db, username, email, password)
+    # wrap in try/except ValueError — return {"error": str(e)} with status 400
+    # on success return {"message": "registered successfully"}
+    try:
+        auth.register(db, username, email, password)
+        return {"message": "registered successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/login")
+def login(username: str, password: str, db: Session = Depends(get_db)):
+    # TODO: call auth.login(db, username, password)
+    # wrap in try/except ValueError — return {"error": str(e)} with status 400
+    # on success return {"token": token}
+    try:
+        token = auth.login(db, username, password)
+        return {"token": token}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/logout")
+def logout(token: str = Header(...), db: Session = Depends(get_db)):
+    # TODO: call auth.logout(db, token)
+    # return {"message": "logged out"}
+    try:
+        auth.logout(db, token)
+        return {"message": "logged out"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/history")
+def history(token: str = Header(...), db: Session = Depends(get_db)):
+    # TODO: call auth.verify_session(db, token) to get user_id
+    # wrap in try/except ValueError — return {"error": str(e)} with status 400
+    # TODO: call get_history(db, user_id)
+    # return {"history": results}  — but results are ORM objects, not JSON-serializable
+    # hint: return a list of dicts: [{"history_id": h.history_id, "timestamp": str(h.timestamp), "report": h.report} for h in results]
+    try:
+        user_id = auth.verify_session(db, token)
+        results = get_history(db, user_id)
+        return {"history": [
+            {"history_id": h.history_id, "timestamp": str(h.timestamp), "report": h.report}
+            for h in results
+        ]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/history/{history_id}")
+def delete_history_entry(history_id: int, token: str = Header(...), db: Session = Depends(get_db)):
+    # TODO: verify_session to get user_id
+    # TODO: call delete_history(db, history_id, user_id)
+    # return {"deleted": True} or {"deleted": False}
+    try:
+        user_id = auth.verify_session(db, token)
+        deleted = delete_history(db, history_id, user_id)
+        return {"deleted": deleted}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
 
 if __name__ == "__main__":
     uvicorn.run("backend.api:app", host="0.0.0.0", port=8000, reload=False)
