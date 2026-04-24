@@ -1,45 +1,47 @@
 import streamlit as st
 
 def show():
+    # Hero section
     st.markdown("""
-        <div style="text-align: center; padding: 60px 0 20px 0;">
-            <h1 style="font-size: 3.5rem;">🫁 MedStep</h1>
-            <h3 style="font-weight: normal; opacity: 0.7;">
+        <div style="text-align: center; padding: 60px 20px 30px 20px;">
+            <h1 style="font-size: 3.5rem; color: #2E6B8A; margin-bottom: 0;">🫁 MedStep</h1>
+            <p style="font-size: 1.3rem; color: #6B6B6B; margin-top: 8px;">
                 AI-Assisted Chest X-Ray Interpretation for Medical Students
-            </h3>
+            </p>
         </div>
     """, unsafe_allow_html=True)
 
-    # Feature highlights
+    # Feature highlights — simple icon row
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("""
-            <div style="text-align:center; padding: 20px;">
-                <h2>🔬</h2>
-                <h4>Smart Detection</h4>
-                <p style="opacity:0.7;">DenseNet121 trained on 75,000+ chest X-rays
-                detecting 6 pathologies with AUC ≥ 0.70</p>
+            <div style="text-align:center; padding: 20px 10px;">
+                <div style="font-size:2.5rem;">🔬</div>
+                <h4 style="color:#2E6B8A;">Smart Detection</h4>
+                <p style="color:#6B6B6B; font-size:0.9rem;">DenseNet121 trained on 75,000+ 
+                chest X-rays detecting 6 pathologies with AUC ≥ 0.70</p>
             </div>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown("""
-            <div style="text-align:center; padding: 20px;">
-                <h2>🗺️</h2>
-                <h4>Visual Explanation</h4>
-                <p style="opacity:0.7;">Grad-CAM heatmaps highlight exactly which
-                regions influenced the AI's decision</p>
+            <div style="text-align:center; padding: 20px 10px;">
+                <div style="font-size:2.5rem;">🗺️</div>
+                <h4 style="color:#2E6B8A;">Visual Explanation</h4>
+                <p style="color:#6B6B6B; font-size:0.9rem;">Grad-CAM heatmaps highlight 
+                exactly which regions influenced the AI decision</p>
             </div>
         """, unsafe_allow_html=True)
     with col3:
         st.markdown("""
-            <div style="text-align:center; padding: 20px;">
-                <h2>📚</h2>
-                <h4>Case Library</h4>
-                <p style="opacity:0.7;">Browse real cases filtered by pathology
-                to build diagnostic confidence</p>
+            <div style="text-align:center; padding: 20px 10px;">
+                <div style="font-size:2.5rem;">📚</div>
+                <h4 style="color:#2E6B8A;">Case Library</h4>
+                <p style="color:#6B6B6B; font-size:0.9rem;">Browse real cases filtered 
+                by pathology to build diagnostic confidence</p>
             </div>
         """, unsafe_allow_html=True)
 
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("---")
 
     # Stats row
@@ -54,13 +56,19 @@ def show():
         st.metric("Model", "DenseNet121")
 
     st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # CTA button
-    col_left, col_center, col_right = st.columns([2, 1, 2])
-    with col_center:
+    # CTA
+    col_l, col_c, col_r = st.columns([2, 1, 2])
+    with col_c:
         if st.button("🚀 Get Started", use_container_width=True):
-            # TODO: set st.session_state.show_login = True
             st.session_state.show_login = True
-            # TODO: st.rerun()
             st.rerun()
-            pass
+
+    # Disclaimer
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("""
+        <p style="text-align:center; color:#6B6B6B; font-size:0.8rem;">
+        For educational purposes only — not a substitute for professional medical diagnosis.
+        </p>
+    """, unsafe_allow_html=True)

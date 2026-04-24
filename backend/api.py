@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi import Request
 from PIL import Image
 import io
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import auth.auth as auth
 from database.history import save_history, get_history, delete_history
-from database.db import get_db, init_db, CXRCase
+from database.db import get_db, init_db, CXRCase, User
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -129,6 +130,29 @@ async def analyze(request: Request, db: Session = Depends(get_db), file: UploadF
         if token:
             user_id = auth.verify_session(db, token)
             save_history(db, user_id=user_id, report=str(report))
+            
+            # TODO: update user progress
+            user = db.query(User).filter(User.user_id == user_id).first()
+            user.analyses_count = (user.analyses_count or 0) + 1
+            
+            # TODO: calculate streak
+            # if last_active was yesterday, increment streak
+            # if last_active was today, keep streak
+            # otherwise reset streak to 1
+            today = datetime.utcnow().date()
+            if user.last_active:
+                last = user.last_active.date()
+                if last == today:
+                    pass  # same day, no change
+                elif (today - last).days == 1:
+                    user.streak_days = (user.streak_days or 0) + 1
+                else:
+                    user.streak_days = 1
+            else:
+                user.streak_days = 1
+            
+            user.last_active = datetime.utcnow()
+            db.commit()
     except Exception:
         pass
 
@@ -260,6 +284,94 @@ def get_library(pathologies: str = "", db: Session = Depends(get_db)):
 load_dotenv("api.env")
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+@app.get("/library/stats")
+def get_library_stats(db: Session = Depends(get_db)):
+    """Return count of cases per pathology."""
+    from sqlalchemy import func
+    stats = {}
+    for pathology in ["pneumonia", "cardiomegaly", "pleural_effusion",
+                      "pneumothorax", "atelectasis", "lung_mass"]:
+        # TODO: count rows where pathology column == 1
+        count = db.query(CXRCase).filter(
+            getattr(CXRCase, pathology) == 1
+        ).count()
+        stats[pathology] = count
+
+    # Count cases where ALL pathology columns == 0
+    from sqlalchemy import and_
+    no_finding_count = db.query(CXRCase).filter(
+        and_(
+            CXRCase.pneumonia == 0,
+            CXRCase.cardiomegaly == 0,
+            CXRCase.pleural_effusion == 0,
+            CXRCase.pneumothorax == 0,
+            CXRCase.atelectasis == 0,
+            CXRCase.lung_mass == 0,
+        )
+    ).count()
+    stats["no_finding"] = no_finding_count
+
+    return stats
+
+@app.post("/second-opinion/save")
+def save_second_opinion(
+    token: str = Header(...),
+    db: Session = Depends(get_db),
+    pathology: str = "",
+    student_correct: bool = False
+):
+    try:
+        user_id = auth.verify_session(db, token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Save as a special history entry
+    report = f"SECOND_OPINION|{pathology}|{student_correct}"
+    save_history(db, user_id=user_id, report=report)
+    return {"saved": True}
+
+@app.get("/second-opinion/stats")
+def get_second_opinion_stats(
+    token: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        user_id = auth.verify_session(db, token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    history = get_history(db, user_id)
+    
+    # Filter second opinion entries
+    so_entries = [h for h in history 
+                  if h.report and h.report.startswith("SECOND_OPINION")]
+
+    # Count correct/total per pathology
+    stats = {p: {"correct": 0, "total": 0} for p in [
+        "pneumonia", "cardiomegaly", "pleural_effusion",
+        "pneumothorax", "atelectasis", "lung_mass"
+    ]}
+
+    for entry in so_entries:
+        # TODO: parse report string "SECOND_OPINION|pathology|True/False"
+        # hint: parts = entry.report.split("|")
+        # pathology = parts[1], correct = parts[2] == "True"
+        parts = entry.report.split("|")
+        if len(parts) == 3:
+            pathology = parts[1]
+            correct = parts[2] == "True"
+            if pathology in stats:
+                stats[pathology]["total"] += 1
+                if correct:
+                    stats[pathology]["correct"] += 1
+
+    # Calculate accuracy per pathology
+    accuracy = {
+        p: round(v["correct"] / v["total"] * 100, 1) if v["total"] > 0 else 0
+        for p, v in stats.items()
+    }
+    return accuracy
+
 @app.get("/encyclopedia/{pathology}")
 def encyclopedia(pathology: str, token: str = Header(...),
                  db: Session = Depends(get_db)):
@@ -291,6 +403,21 @@ def encyclopedia(pathology: str, token: str = Header(...),
         max_tokens=1024
     )
     return {"content": response.choices[0].message.content.strip()}
+
+@app.get("/progress")
+def get_progress(token: str = Header(...), db: Session = Depends(get_db)):
+    try:
+        user_id = auth.verify_session(db, token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    return {
+        "username":       user.username,
+        "analyses_count": user.analyses_count,
+        "streak_days":    user.streak_days,
+        "last_active":    str(user.last_active) if user.last_active else None
+    }
 
 if __name__ == "__main__":
     uvicorn.run("backend.api:app", host="0.0.0.0", port=8000, reload=False)

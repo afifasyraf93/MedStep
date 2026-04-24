@@ -12,12 +12,18 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = "users"
 
-    user_id       = Column(Integer, primary_key=True, autoincrement=True)
-    username      = Column(String(50), unique=True, nullable=False)
-    email         = Column(String(100), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    role          = Column(String(20), nullable=False, default="student")
-    created_at    = Column(DateTime, default=datetime.utcnow)
+    user_id         = Column(Integer, primary_key=True, autoincrement=True)
+    username        = Column(String(50), unique=True, nullable=False)
+    email           = Column(String(100), unique=True, nullable=False)
+    password_hash   = Column(String(255), nullable=False)
+    role            = Column(String(20), nullable=False, default="student")
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    # TODO: add analyses_count — Integer, default=0
+    analyses_count  = Column(Integer, default=0)
+    # TODO: add streak_days — Integer, default=0
+    streak_days     = Column(Integer, default=0)
+    # TODO: add last_active — DateTime, nullable=True
+    last_active     = Column(DateTime, nullable=True)
 
     # TODO: add relationship to UserSession (back_populates="user")
     sessions = relationship("UserSession", back_populates="user")
