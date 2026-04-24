@@ -16,10 +16,15 @@ from modules.localization import generate_all_heatmaps
 from modules.retrieval import load_retrieval_system, retrieve
 from modules.explanation import generate_report
 from fastapi import Depends, Header
+from fastapi.responses import FileResponse
 from database.db import get_db, init_db
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 import auth.auth as auth
 from database.history import save_history, get_history, delete_history
+from database.db import get_db, init_db, CXRCase
+from groq import Groq
+from dotenv import load_dotenv
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 MODEL_PATH  = "models/combined_densenet121_best.pth"
@@ -214,6 +219,78 @@ def delete_history_entry(history_id: int, token: str = Header(...), db: Session 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
+@app.get("/library")
+def get_library(pathologies: str = "", db: Session = Depends(get_db)):
+    # pathologies is a comma-separated string e.g. "pneumonia,cardiomegaly"
+    # if empty, return all cases
+    # if specified, filter rows where ANY of those columns == 1
+    # return list of dicts
+    # TODO: split pathologies string into list
+    # hint: [p.strip() for p in pathologies.split(",") if p.strip()]
+    pathology_list = [p.strip() for p in pathologies.split(",") if p.strip()]
+
+    # TODO: if pathology_list is empty, query all cases
+    # if not empty, filter with or_(*filters)
+    if not pathology_list:
+        cases = db.query(CXRCase).all()
+    else:
+        filters = [getattr(CXRCase, p) == 1 for p in pathology_list]
+        cases = db.query(CXRCase).filter(or_(*filters)).all()
+
+    # TODO: return list of dicts
+    # each dict: image_id, patient_id, image_path + all 6 pathology columns
+    return [
+        {
+            "image_id":   c.image_id,
+            "patient_id": c.patient_id,
+            "image_path": c.image_path,
+            "labels": {
+                # TODO: fill in all 6 pathology keys from the CXRCase object
+                "pneumonia":        c.pneumonia,
+                "cardiomegaly":     c.cardiomegaly,
+                "pleural_effusion": c.pleural_effusion,
+                "pneumothorax":     c.pneumothorax,
+                "atelectasis":      c.atelectasis,
+                "lung_mass":        c.lung_mass,
+            }
+        }
+        for c in cases
+    ]
+
+load_dotenv("api.env")
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+@app.get("/encyclopedia/{pathology}")
+def encyclopedia(pathology: str, token: str = Header(...),
+                 db: Session = Depends(get_db)):
+    try:
+        auth.verify_session(db, token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    prompt = f"""You are a radiology educator. Explain {pathology.replace('_', ' ')} 
+    for a medical student learning chest X-ray interpretation. Include:
+    1. Definition and pathophysiology
+    2. Chest X-ray findings to look for
+    3. Clinical significance
+    4. Common mistakes students make when reading CXRs for this condition
+    Keep it educational, concise and practical.
+    """
+
+    # TODO: call groq_client.chat.completions.create
+    # text-only, same pattern as generate_impression in explanation.py
+    # model = "meta-llama/llama-4-scout-17b-16e-instruct"
+    # max_tokens = 1024
+    # return {"content": response_text}
+    response = client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        messages=[{
+            "role": "user",
+            "content": prompt
+        }],
+        max_tokens=1024
+    )
+    return {"content": response.choices[0].message.content.strip()}
 
 if __name__ == "__main__":
     uvicorn.run("backend.api:app", host="0.0.0.0", port=8000, reload=False)
