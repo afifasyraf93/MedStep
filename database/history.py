@@ -19,7 +19,7 @@ def save_history(db: Session, user_id: int, report: str, image_id: str = None):
 def get_history(db: Session, user_id: int):
     """Return all History rows for this user, newest first."""
     # TODO: query History filtered by user_id
-    history = db.query(History).filter(History.user_id == user_id).first()
+    history = db.query(History).filter(History.user_id == user_id)
     # TODO: order by timestamp descending — .order_by(History.timestamp.desc())
     history = history.order_by(History.timestamp.desc())
     # TODO: return .all()
