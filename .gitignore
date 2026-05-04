@@ -15,6 +15,9 @@ __pycache__/
 # Virtual environment
 venv/
 
+#Claude
+.claude/
+
 # API keys
 api.env
 .env
@@ -25,3 +28,6 @@ test_heatmap_output.png
 
 # Old version
 v1.0.1/
+
+#Evaluation Result
+evaluation/gradcam_results/
