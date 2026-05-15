@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Case Library{% endblock %}
+{% block page_title %}Case Library{% endblock %}
+
+{% block extra_css %}
+<style>
+    .filter-bar {
+        background: white;
+        border: 1px solid #E0D8CE;
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .filter-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #6B6B6B;
+        white-space: nowrap;
+    }
+
+    .filter-chip {
+        padding: 6px 14px;
+        border-radius: 20px;
+        border: 1px solid #E0D8CE;
+        background: white;
+        color: #6B6B6B;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+    }
+
+    .filter-chip:hover {
+        border-color: #2E6B8A;
+        color: #2E6B8A;
+    }
+
+    .filter-chip.active {
+        background: #2E6B8A;
+        border-color: #2E6B8A;
+        color: white;
+    }
+
+    .filter-chip.clear {
+        border-color: #E07B4F;
+        color: #E07B4F;
+    }
+
+    .filter-chip.clear:hover {
+        background: #E07B4F;
+        color: white;
+    }
+
+    .case-card {
+        background: white;
+        border: 1px solid #E0D8CE;
+        border-radius: 12px;
+        overflow: hidden;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .case-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+    }
+
+    .case-card img {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+        background: #1a1a1a;
+    }
+
+    .case-card-body {
+        padding: 12px;
+    }
+
+    .case-patient {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #2C2C2C;
+        margin-bottom: 6px;
+    }
+
+    .pathology-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.72rem;
+        font-weight: 500;
+        background: rgba(46,107,138,0.1);
+        color: #2E6B8A;
+        margin: 2px;
+    }
+
+    .no-finding-tag {
+        background: rgba(107,107,107,0.1);
+        color: #6B6B6B;
+    }
+
+    .results-info {
+        font-size: 0.85rem;
+        color: #6B6B6B;
+        margin-bottom: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <span class="filter-label"><i class="fas fa-filter me-1"></i>Filter:</span>
+
+    {% set pathologies = ['pneumonia','cardiomegaly','pleural_effusion',
+                          'pneumothorax','atelectasis','lung_mass'] %}
+
+    {% for p in pathologies %}
+    <a href="/library?pathologies={% if p in selected %}{{ (selected|reject('equalto', p)|list)|join(',') }}{% else %}{{ (selected + [p])|join(',') }}{% endif %}"
+       class="filter-chip {% if p in selected %}active{% endif %}">
+        {{ p.replace('_',' ').title() }}
+    </a>
+    {% endfor %}
+
+    {% if selected %}
+    <a href="/library" class="filter-chip clear">
+        <i class="fas fa-times me-1"></i>Clear
+    </a>
+    {% endif %}
+</div>
+
+<!-- Results Count -->
+<div class="results-info">
+    Showing <strong>{{ cases|length }}</strong> cases
+    {% if selected %}
+    matching <strong>{{ selected|join(', ') }}</strong>
+    {% endif %}
+</div>
+
+<!-- Cases Grid -->
+{% if cases %}
+<div class="row g-3">
+    {% for case in cases %}
+    <div class="col-md-3 col-sm-6">
+        <div class="case-card">
+            <div class="img-wrapper" style="height:180px;">
+                <img src="http://localhost:8000/image?path={{ case.image_path }}"
+                    alt="CXR"
+                    style="width:100%; height:180px; object-fit:cover; cursor:zoom-in;"
+                    onclick="openLightbox(this.src)"
+                    class="skeleton"
+                    onload="this.classList.remove('skeleton'); this.classList.add('loaded');"
+                    onerror="this.classList.remove('skeleton'); this.style.background='#2C3E50';">
+            </div>
+            <div class="case-card-body">
+                <div class="case-patient">
+                    <i class="fas fa-user-circle me-1" style="color:#2E6B8A;"></i>
+                    {{ case.patient_id }}
+                </div>
+                <div>
+                    {% set positive = [] %}
+                    {% for p, v in case.labels.items() %}
+                        {% if v == 1 %}
+                            {% set _ = positive.append(p) %}
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if positive %}
+                        {% for p in positive %}
+                        <span class="pathology-tag">
+                            {{ p.replace('_',' ').title() }}
+                        </span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="pathology-tag no-finding-tag">No Findings</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% else %}
+<div style="text-align:center; padding:60px; color:#6B6B6B;">
+    <i class="fas fa-folder-open fa-3x mb-3" style="opacity:0.3;"></i>
+    <p>No cases found for the selected filters.</p>
+    <a href="/library" class="btn btn-outline-primary btn-sm">Clear Filters</a>
+</div>
+{% endif %}
+
+{% endblock %}

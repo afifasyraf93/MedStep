@@ -1,0 +1,1034 @@
+{% extends "base.html" %}
+{% block title %}Analysis{% endblock %}
+{% block page_title %}Analysis{% endblock %}
+
+{% block extra_css %}
+<style>
+    .mode-toggle {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+    }
+
+    .mode-btn {
+        padding: 10px 24px;
+        border-radius: 8px;
+        border: 2px solid #2E6B8A;
+        background: transparent;
+        color: #2E6B8A;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 0.9rem;
+    }
+
+    .mode-btn.active {
+        background: #2E6B8A;
+        color: white;
+    }
+
+    .upload-zone {
+        border: 2px dashed #E0D8CE;
+        border-radius: 12px;
+        padding: 40px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: white;
+    }
+
+    .upload-zone:hover, .upload-zone.dragover {
+        border-color: #2E6B8A;
+        background: rgba(46,107,138,0.03);
+    }
+
+    .upload-icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+    .upload-zone input[type="file"] { display: none; }
+
+    .preview-img {
+        width: 100%;
+        border-radius: 8px;
+        object-fit: contain;
+        max-height: 300px;
+        background: #000;
+    }
+
+    .detection-item {
+        padding: 10px 0;
+        border-bottom: 1px solid #F0EAE0;
+    }
+
+    .detection-item:last-child { border-bottom: none; }
+
+    .detection-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+    }
+
+    .pathology-name {
+        font-weight: 500;
+        font-size: 0.9rem;
+        color: #2C2C2C;
+    }
+
+    .progress {
+        height: 6px;
+        border-radius: 3px;
+        background: #F0EAE0;
+    }
+
+    .progress-bar { border-radius: 3px; transition: width 0.5s ease; }
+
+    .heatmap-selector {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+
+    .heatmap-btn {
+        padding: 6px 14px;
+        border-radius: 20px;
+        border: 1px solid #2E6B8A;
+        background: transparent;
+        color: #2E6B8A;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .heatmap-btn.active {
+        background: #2E6B8A;
+        color: white;
+    }
+
+    .similar-card {
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid #E0D8CE;
+        background: white;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .similar-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .similar-card img {
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+        background: #000;
+    }
+
+    .similar-card-body {
+        padding: 10px;
+    }
+
+    .spinner-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 9999;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 16px;
+        color: white;
+        font-size: 1rem;
+    }
+
+    .spinner-overlay.active { display: flex; }
+
+    .report-box {
+        background: #FAFAF8;
+        border: 1px solid #E0D8CE;
+        border-radius: 10px;
+        padding: 20px;
+        font-size: 0.9rem;
+        line-height: 1.7;
+        white-space: pre-wrap;
+    }
+
+    .threshold-label {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        color: #6B6B6B;
+        margin-bottom: 4px;
+    }
+
+    /* Second Opinion */
+    .pathology-checkbox {
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid #E0D8CE;
+        background: white;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.9rem;
+    }
+
+    .pathology-checkbox.checked {
+        border-color: #2E6B8A;
+        background: rgba(46,107,138,0.05);
+        color: #2E6B8A;
+        font-weight: 500;
+    }
+
+    .comparison-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 2fr;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid #F0EAE0;
+        align-items: center;
+        font-size: 0.88rem;
+    }
+
+    .comparison-row:last-child { border-bottom: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Spinner -->
+<div class="spinner-overlay" id="spinner">
+    <div style="background:white; border-radius:16px; padding:32px 40px; 
+                min-width:320px; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+        
+        <h6 style="color:#2C2C2C; font-weight:700; margin-bottom:24px; text-align:center;">
+            🔬 Analyzing X-Ray...
+        </h6>
+
+        <div id="stepsList" style="display:flex; flex-direction:column; gap:12px;">
+            {% set steps = [
+                ('step1', 'fa-brain',      'Running Detection'),
+                ('step2', 'fa-fire',       'Generating Heatmaps'),
+                ('step3', 'fa-magnifying-glass', 'Finding Similar Cases'),
+                ('step4', 'fa-file-medical', 'Writing AI Report')
+            ] %}
+            {% for id, icon, label in steps %}
+            <div id="{{ id }}" style="display:flex; align-items:center; gap:12px;
+                        opacity:0.3; transition: opacity 0.3s;">
+                <div style="width:32px; height:32px; border-radius:50%;
+                            background:#F0EAE0; display:flex; align-items:center;
+                            justify-content:center; flex-shrink:0;">
+                    <i class="fas {{ icon }}" style="font-size:0.85rem; color:#2E6B8A;"></i>
+                </div>
+                <span style="font-size:0.88rem; color:#2C2C2C; font-weight:500;">
+                    {{ label }}
+                </span>
+                <i class="fas fa-check ms-auto" id="{{ id }}_check"
+                   style="color:#4CAF7D; display:none;"></i>
+                <div class="spinner-border spinner-border-sm ms-auto" 
+                     id="{{ id }}_spin"
+                     style="color:#2E6B8A; display:none; width:16px; height:16px;"></div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Mode Toggle -->
+<div class="mode-toggle">
+    <button class="mode-btn active" id="btnAI" onclick="switchMode('ai')">
+        🤖 AI Analysis
+    </button>
+    <button class="mode-btn" id="btnSO" onclick="switchMode('second')">
+        🩺 Second Opinion
+    </button>
+</div>
+
+<!-- ── AI ANALYSIS MODE ──────────────────────────────── -->
+<div id="aiMode">
+    <div class="row g-3">
+        <!-- Upload + Controls -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fas fa-upload me-2"></i>Upload X-Ray
+                </div>
+                <div class="card-body">
+                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                        <div class="upload-icon">📤</div>
+                        <p style="color:#6B6B6B; font-size:0.9rem; margin:0;">
+                            Click or drag & drop<br>
+                            <small>JPG, JPEG, PNG</small>
+                        </p>
+                        <input type="file" id="fileInput" accept=".jpg,.jpeg,.png"
+                               onchange="handleFileSelect(this)">
+                    </div>
+
+                    <div id="previewContainer" style="display:none; margin-top:12px;">
+                        <img id="previewImg" class="preview-img" src="" alt="Preview">
+                    </div>
+
+                    <div style="margin-top:16px;">
+                        <div class="threshold-label">
+                            <span>Detection Threshold</span>
+                            <span id="thresholdVal">0.50</span>
+                        </div>
+                        <input type="range" class="form-range" id="thresholdSlider"
+                               min="0" max="1" step="0.05" value="0.5"
+                               oninput="updateThreshold(this.value)">
+                    </div>
+
+                    <button class="btn btn-primary w-100 mt-3" onclick="runAnalysis()"
+                            id="analyzeBtn" disabled>
+                        <i class="fas fa-microscope me-2"></i>Analyze
+                    </button>
+
+                    <button class="btn btn-outline-secondary w-100 mt-2"
+                            onclick="resetAnalysis()" id="resetBtn" style="display:none;">
+                        <i class="fas fa-rotate-left me-2"></i>New Analysis
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Results -->
+        <div class="col-md-8">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fas fa-chart-bar me-2"></i>Detection Results
+                </div>
+                <div class="card-body" id="detectionResults">
+                    <div style="text-align:center; padding:40px; color:#6B6B6B;">
+                        <i class="fas fa-arrow-left fa-2x mb-3" style="opacity:0.3;"></i>
+                        <p>Upload a chest X-ray to begin analysis</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Heatmap Viewer -->
+    <div class="card mt-3" id="heatmapCard" style="display:none;">
+        <div class="card-header">
+            <i class="fas fa-fire me-2"></i>Heatmap Viewer
+            <small class="text-muted ms-2">Select a detected pathology</small>
+        </div>
+        <div class="card-body">
+            <div class="heatmap-selector" id="heatmapBtns"></div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <p class="fw-600 mb-2" style="font-size:0.85rem; color:#6B6B6B;">Original</p>
+                    <img id="heatmapOriginal" class="preview-img" src="" alt="Original">
+                </div>
+                <div class="col-md-6">
+                    <p class="fw-600 mb-2" style="font-size:0.85rem; color:#6B6B6B;">
+                        Grad-CAM Heatmap
+                    </p>
+                    <img id="heatmapOverlay" class="preview-img" src="" alt="Heatmap">
+                </div>
+            </div>
+            <p style="font-size:0.75rem; color:#6B6B6B; margin-top:8px;">
+                🔴 Red = high activation &nbsp;|&nbsp; 🔵 Blue = low activation
+            </p>
+        </div>
+    </div>
+
+    <!-- Similar Cases -->
+    <div class="card mt-3" id="similarCard" style="display:none;">
+        <div class="card-header">
+            <i class="fas fa-images me-2"></i>Similar Cases
+        </div>
+        <div class="card-body">
+            <div class="row g-3" id="similarCases"></div>
+        </div>
+    </div>
+
+    <!-- AI Report -->
+    <div class="card mt-3" id="reportCard" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-file-medical me-2"></i>AI Report</span>
+            <div style="display:flex; gap:8px; flex-shrink:0;">
+                <button class="btn btn-sm btn-outline-secondary" onclick="copyReport()">
+                    <i class="fas fa-copy me-1"></i>Copy
+                </button>
+                <button class="btn btn-sm btn-outline-primary" onclick="downloadPDF(event)">
+                    <i class="fas fa-download me-1"></i>PDF
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="report-box" id="reportContent"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── SECOND OPINION MODE ────────────────────────────── -->
+<div id="secondMode" style="display:none;">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fas fa-upload me-2"></i>Upload X-Ray
+                </div>
+                <div class="card-body">
+                    <div class="upload-zone" id="soUploadZone"
+                         onclick="document.getElementById('soFileInput').click()">
+                        <div class="upload-icon">📤</div>
+                        <p style="color:#6B6B6B; font-size:0.9rem; margin:0;">
+                            Click or drag & drop<br>
+                            <small>JPG, JPEG, PNG</small>
+                        </p>
+                        <input type="file" id="soFileInput" accept=".jpg,.jpeg,.png"
+                               onchange="handleSOFileSelect(this)">
+                    </div>
+                    <div id="soPreviewContainer" style="display:none; margin-top:12px;">
+                        <img id="soPreviewImg" class="preview-img" src="" alt="Preview">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fas fa-stethoscope me-2"></i>Your Diagnosis
+                </div>
+                <div class="card-body">
+                    <p style="color:#6B6B6B; font-size:0.85rem; margin-bottom:16px;">
+                        Select all pathologies you think are present:
+                    </p>
+                    <div class="row g-2" id="checkboxGrid">
+                        {% set pathologies = ['pneumonia','cardiomegaly','pleural_effusion',
+                                              'pneumothorax','atelectasis','lung_mass'] %}
+                        {% for p in pathologies %}
+                        <div class="col-md-6">
+                            <div class="pathology-checkbox" id="cb_{{ p }}"
+                                 onclick="toggleCheckbox('{{ p }}')">
+                                <i class="fas fa-square" style="color:#E0D8CE;"></i>
+                                <span>{{ p.replace('_',' ').title() }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <button class="btn btn-primary w-100 mt-3"
+                            onclick="runSecondOpinion()" id="soBtn" disabled>
+                        <i class="fas fa-code-compare me-2"></i>Compare with AI
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comparison Results -->
+    <div class="card mt-3" id="comparisonCard" style="display:none;">
+        <div class="card-header">
+            <i class="fas fa-scale-balanced me-2"></i>Comparison Results
+        </div>
+        <div class="card-body">
+            <div style="display:grid; grid-template-columns:2fr 1fr 2fr; gap:12px;
+                        padding:8px 0; border-bottom:2px solid #E0D8CE; font-weight:600;
+                        font-size:0.85rem; color:#6B6B6B;">
+                <div>Pathology</div>
+                <div>Your Answer</div>
+                <div>AI Prediction</div>
+            </div>
+            <div id="comparisonRows"></div>
+            <div class="mt-3 p-3" style="background:#F0EAE0; border-radius:8px;">
+                <span style="font-weight:700; font-size:1.1rem;" id="scoreDisplay"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- SO Report -->
+    <div class="card mt-3" id="soReportCard" style="display:none;">
+        <div class="card-header">
+            <i class="fas fa-file-medical me-2"></i>AI Report
+        </div>
+        <div class="card-body">
+            <div class="report-box" id="soReportContent"></div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+// ── Progress Steps ────────────────────────────────────
+function setStep(stepId, state) {
+    // state: 'active', 'done', 'idle'
+    const el = document.getElementById(stepId);
+    const check = document.getElementById(stepId + '_check');
+    const spin = document.getElementById(stepId + '_spin');
+
+    if (state === 'active') {
+        el.style.opacity = '1';
+        spin.style.display = 'block';
+        check.style.display = 'none';
+    } else if (state === 'done') {
+        el.style.opacity = '1';
+        spin.style.display = 'none';
+        check.style.display = 'block';
+    } else {
+        el.style.opacity = '0.3';
+        spin.style.display = 'none';
+        check.style.display = 'none';
+    }
+}
+
+function resetSteps() {
+    ['step1','step2','step3','step4'].forEach(s => setStep(s, 'idle'));
+}
+
+const PATHOLOGIES = ['pneumonia','cardiomegaly','pleural_effusion',
+                     'pneumothorax','atelectasis','lung_mass'];
+let currentFile = null;
+let analysisData = null;
+let threshold = 0.5;
+let studentDiagnosis = {};
+let soFile = null;
+
+// ── Mode Switch ──────────────────────────────────────
+function switchMode(mode) {
+    document.getElementById('aiMode').style.display = mode === 'ai' ? 'block' : 'none';
+    document.getElementById('secondMode').style.display = mode === 'second' ? 'block' : 'none';
+    document.getElementById('btnAI').classList.toggle('active', mode === 'ai');
+    document.getElementById('btnSO').classList.toggle('active', mode === 'second');
+}
+
+// ── Threshold ────────────────────────────────────────
+function updateThreshold(val) {
+    threshold = parseFloat(val);
+    document.getElementById('thresholdVal').textContent = parseFloat(val).toFixed(2);
+    if (analysisData) renderDetections(analysisData.detections);
+}
+
+// ── File Select ──────────────────────────────────────
+function handleFileSelect(input) {
+    if (!input.files[0]) return;
+    currentFile = input.files[0];
+    const url = URL.createObjectURL(currentFile);
+    document.getElementById('previewImg').src = url;
+    document.getElementById('previewContainer').style.display = 'block';
+    document.getElementById('uploadZone').style.display = 'none';
+    document.getElementById('analyzeBtn').disabled = false;
+}
+
+function handleSOFileSelect(input) {
+    if (!input.files[0]) return;
+    soFile = input.files[0];
+    const url = URL.createObjectURL(soFile);
+    document.getElementById('soPreviewImg').src = url;
+    document.getElementById('soPreviewContainer').style.display = 'block';
+    document.getElementById('soUploadZone').style.display = 'none';
+    document.getElementById('soBtn').disabled = false;
+}
+
+// ── Drag & Drop ───────────────────────────────────────
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+        currentFile = file;
+        const url = URL.createObjectURL(file);
+        document.getElementById('previewImg').src = url;
+        document.getElementById('previewContainer').style.display = 'block';
+        document.getElementById('uploadZone').style.display = 'none';
+        document.getElementById('analyzeBtn').disabled = false;
+    }
+});
+
+// ── Render Detections ─────────────────────────────────
+function renderDetections(detections) {
+    const container = document.getElementById('detectionResults');
+    container.innerHTML = '';
+    for (const [path, prob] of Object.entries(detections)) {
+        const detected = prob >= threshold;
+        const sev = getSeverity(prob);
+        const pct = (prob * 100).toFixed(1);
+        const barColor = detected ? sev.color : '#CBD5E1';
+        container.innerHTML += `
+            <div class="detection-item">
+                <div class="detection-label">
+                    <span class="pathology-name">
+                        ${detected ? '✅' : '⬜'}
+                        ${path.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </span>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <span style="font-size:0.8rem; color:#6B6B6B;">${pct}%</span>
+                        <span style="font-size:0.75rem; padding:2px 8px; border-radius:10px;
+                               background:${sev.bg}; color:${sev.color}; font-weight:500;">
+                            ${sev.label}
+                        </span>
+                    </div>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar" style="width:${pct}%; background:${barColor};"></div>
+                </div>
+            </div>`;
+    }
+}
+
+// ── Run Analysis ──────────────────────────────────────
+async function runAnalysis() {
+    if (!currentFile) return;
+
+    document.getElementById('spinner').classList.add('active');
+    document.getElementById('analyzeBtn').disabled = true;
+    resetSteps();
+
+    // Simulate step progression while API processes
+    setStep('step1', 'active');
+    const stepTimer1 = setTimeout(() => {
+        setStep('step1', 'done');
+        setStep('step2', 'active');
+    }, 1500);
+
+    const stepTimer2 = setTimeout(() => {
+        setStep('step2', 'done');
+        setStep('step3', 'active');
+    }, 4000);
+
+    const stepTimer3 = setTimeout(() => {
+        setStep('step3', 'done');
+        setStep('step4', 'active');
+    }, 6000);
+
+    const formData = new FormData();
+    formData.append('file', currentFile);
+    formData.append('threshold', threshold);
+
+    try {
+        const res = await fetch('/api/analyze', {
+            method: 'POST',
+            body: formData
+        });
+
+        // Complete all steps
+        clearTimeout(stepTimer1);
+        clearTimeout(stepTimer2);
+        clearTimeout(stepTimer3);
+        setStep('step1', 'done');
+        setStep('step2', 'done');
+        setStep('step3', 'done');
+        setStep('step4', 'done');
+
+        await new Promise(r => setTimeout(r, 600)); // brief pause to show all done
+
+        if (!res.ok) throw new Error('Analysis failed');
+        analysisData = await res.json();
+
+        renderDetections(analysisData.detections);
+        renderHeatmaps(analysisData.heatmaps, analysisData.detections);
+        renderSimilarCases(analysisData.similar_cases);
+        renderReport(analysisData.report);
+        renderCaseForm(analysisData);
+
+        document.getElementById('resetBtn').style.display = 'block';
+        document.getElementById('analyzeBtn').style.display = 'none';
+        showToast('Analysis complete!', 'success');
+
+    } catch (err) {
+        showToast('Analysis failed: ' + err.message, 'error');
+        document.getElementById('analyzeBtn').disabled = false;
+        resetSteps();
+    } finally {
+        document.getElementById('spinner').classList.remove('active');
+    }
+}
+
+// ── Heatmaps ──────────────────────────────────────────
+function renderHeatmaps(heatmaps, detections) {
+    const detected = Object.entries(detections)
+        .filter(([p, prob]) => prob >= threshold)
+        .map(([p]) => p);
+
+    if (detected.length === 0) return;
+
+    document.getElementById('heatmapOriginal').onclick = function() { openLightbox(this.src); }
+    document.getElementById('heatmapOverlay').onclick = function() { openLightbox(this.src); }
+    document.getElementById('heatmapOriginal').style.cursor = 'zoom-in';
+    document.getElementById('heatmapOverlay').style.cursor = 'zoom-in';
+    document.getElementById('heatmapCard').style.display = 'block';
+    const btns = document.getElementById('heatmapBtns');
+    btns.innerHTML = '';
+
+    detected.forEach((p, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'heatmap-btn' + (i === 0 ? ' active' : '');
+        btn.textContent = p.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase());
+        btn.onclick = () => showHeatmap(p, heatmaps[p], btn);
+        btns.appendChild(btn);
+    });
+
+    // Show first heatmap
+    if (detected[0] && heatmaps[detected[0]]) {
+        document.getElementById('heatmapOriginal').src =
+            URL.createObjectURL(currentFile);
+        document.getElementById('heatmapOverlay').src =
+            'data:image/png;base64,' + heatmaps[detected[0]];
+    }
+}
+
+function showHeatmap(pathology, b64, btn) {
+    document.querySelectorAll('.heatmap-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('heatmapOriginal').src = URL.createObjectURL(currentFile);
+    document.getElementById('heatmapOverlay').src = 'data:image/png;base64,' + b64;
+}
+
+// ── Similar Cases ─────────────────────────────────────
+function renderSimilarCases(cases) {
+    document.getElementById('similarCard').style.display = 'block';
+    const container = document.getElementById('similarCases');
+    container.innerHTML = '';
+    cases.forEach(c => {
+        const positive = Object.entries(c.labels || {})
+            .filter(([k,v]) => v === 1)
+            .map(([k]) => k.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase()))
+            .join(', ') || 'No findings';
+        container.innerHTML += `
+            <div class="col-md-4">
+                <div class="similar-card">
+                    <img src="http://localhost:8000/image?path=${c.path}"
+                         style="cursor:zoom-in;"
+                         onclick="openLightbox(this.src)"
+                         alt="Similar case" onerror="this.src='/static/img/placeholder.png'">
+                    <div class="similar-card-body">
+                        <div style="font-size:0.8rem; color:#6B6B6B; margin-bottom:4px;">
+                            ${c.path ? c.path.split('/').slice(-3,-1).join('/') : 'Case'}
+                        </div>
+                        <div style="font-size:0.82rem; font-weight:500; color:#2E6B8A;">
+                            ${positive}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+    });
+}
+
+// ── Report ────────────────────────────────────────────
+function renderReport(report) {
+    document.getElementById('reportCard').style.display = 'block';
+    const content = document.getElementById('reportContent');
+    if (typeof report === 'object') {
+        content.textContent =
+            'FINDINGS:\n' + (report.findings || '') +
+            '\n\nIMPRESSION:\n' + (report.impression || '');
+    } else {
+        content.textContent = report || 'No report available.';
+    }
+}
+
+function copyReport() {
+    const content = document.getElementById('reportContent').textContent;
+    if (!content || content.trim() === '') {
+        showToast('No report to copy.', 'warning');
+        return;
+    }
+    navigator.clipboard.writeText(content)
+        .then(() => showToast('Report copied to clipboard!', 'success'))
+        .catch(() => showToast('Failed to copy report.', 'error'));
+}
+
+function renderCaseForm(data) {
+    const existing = document.getElementById('caseFormCard');
+    if (existing) existing.remove();
+
+    const card = document.createElement('div');
+    card.id = 'caseFormCard';
+    card.className = 'card mt-3';
+    card.innerHTML = `
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-folder-open me-2"></i>Case Details <small class="text-muted ms-1">(optional)</small></span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label style="font-size:0.85rem; font-weight:500; color:#2C2C2C; margin-bottom:4px;">Case Name / ID</label>
+                    <input type="text" id="caseNameInput" class="form-control"
+                           placeholder="e.g. Case 001, Patient A"
+                           style="font-size:0.88rem;">
+                </div>
+                <div class="col-md-6">
+                    <label style="font-size:0.85rem; font-weight:500; color:#2C2C2C; margin-bottom:4px;">Patient Reference</label>
+                    <input type="text" id="patientRefInput" class="form-control"
+                           placeholder="e.g. MRN-00123"
+                           style="font-size:0.88rem;">
+                </div>
+                <div class="col-12">
+                    <label style="font-size:0.85rem; font-weight:500; color:#2C2C2C; margin-bottom:4px;">Your Notes</label>
+                    <textarea id="notesInput" class="form-control" rows="3"
+                              placeholder="Add your clinical observations..."
+                              style="font-size:0.88rem; resize:vertical;"></textarea>
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-outline-primary btn-sm px-4"
+                            onclick="saveCaseDetails()">
+                        <i class="fas fa-save me-1"></i>Save Details
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('reportCard').after(card);
+}
+
+let currentHistoryId = null;
+
+async function saveCaseDetails() {
+    const caseName   = document.getElementById('caseNameInput').value;
+    const patientRef = document.getElementById('patientRefInput').value;
+    const notes      = document.getElementById('notesInput').value;
+
+    if (!caseName && !patientRef && !notes) {
+        showToast('Please fill in at least one field.', 'warning');
+        return;
+    }
+
+    // Get latest history id
+    try {
+        const histRes = await fetch('/api/history');
+        const histData = await histRes.json();
+        const latest = histData.history[0];
+        if (!latest) {
+            showToast('No analysis found to update.', 'error');
+            return;
+        }
+        currentHistoryId = latest.history_id;
+
+        const res = await fetch(`/api/history/${currentHistoryId}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                case_name:   caseName,
+                patient_ref: patientRef,
+                notes:       notes
+            })
+        });
+
+        if (res.ok) {
+            showToast('Case details saved!', 'success');
+        } else {
+            showToast('Failed to save details.', 'error');
+        }
+    } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+// ── Reset ─────────────────────────────────────────────
+function resetAnalysis() {
+    currentFile = null;
+    analysisData = null;
+    document.getElementById('previewContainer').style.display = 'none';
+    document.getElementById('uploadZone').style.display = 'block';
+    document.getElementById('analyzeBtn').disabled = true;
+    document.getElementById('analyzeBtn').style.display = 'block';
+    document.getElementById('resetBtn').style.display = 'none';
+    document.getElementById('detectionResults').innerHTML = `
+        <div style="text-align:center; padding:40px; color:#6B6B6B;">
+            <i class="fas fa-arrow-left fa-2x mb-3" style="opacity:0.3;"></i>
+            <p>Upload a chest X-ray to begin analysis</p>
+        </div>`;
+    document.getElementById('heatmapCard').style.display = 'none';
+    document.getElementById('similarCard').style.display = 'none';
+    document.getElementById('reportCard').style.display = 'none';
+}
+
+// ── Second Opinion ────────────────────────────────────
+function toggleCheckbox(pathology) {
+    const el = document.getElementById('cb_' + pathology);
+    const checked = el.classList.toggle('checked');
+    studentDiagnosis[pathology] = checked;
+    el.querySelector('i').className =
+        checked ? 'fas fa-check-square' : 'fas fa-square';
+    el.querySelector('i').style.color = checked ? '#2E6B8A' : '#E0D8CE';
+}
+
+async function runSecondOpinion() {
+    if (!soFile) return;
+    document.getElementById('spinner').classList.add('active');
+
+    const formData = new FormData();
+    formData.append('file', soFile);
+    formData.append('threshold', 0.5);
+    formData.append('mode', 'second_opinion'); 
+
+    try {
+        formData.append('mode', 'second_opinion');
+        const res = await fetch('/api/analyze', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+
+        // Render comparison
+        document.getElementById('comparisonCard').style.display = 'block';
+        const rows = document.getElementById('comparisonRows');
+        rows.innerHTML = '';
+        let matches = 0;
+
+        PATHOLOGIES.forEach(p => {
+            const studentSaid = studentDiagnosis[p] || false;
+            const aiProb = data.detections[p] || 0;
+            const aiSaid = aiProb >= 0.5;
+            const match = studentSaid === aiSaid;
+            if (match) matches++;
+            const sev = getSeverity(aiProb);
+
+            rows.innerHTML += `
+                <div class="comparison-row">
+                    <div>
+                        ${match ? '✅' : '❌'}
+                        ${p.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}
+                    </div>
+                    <div>${studentSaid ?
+                        '<span style="color:#16a34a;">Yes</span>' :
+                        '<span style="color:#6B6B6B;">No</span>'}
+                    </div>
+                    <div>
+                        <span style="font-size:0.8rem; padding:2px 8px; border-radius:10px;
+                              background:${sev.bg}; color:${sev.color};">
+                            ${(aiProb*100).toFixed(1)}% — ${sev.label}
+                        </span>
+                    </div>
+                </div>`;
+        });
+
+        document.getElementById('scoreDisplay').textContent =
+            `Your Score: ${matches}/${PATHOLOGIES.length} — ` +
+            (matches >= 4 ? '🎉 Great job!' :
+             matches >= 2 ? '📚 Keep practicing!' : '💪 Review the findings below');
+
+        // Show heatmaps
+        if (data.heatmaps && Object.keys(data.heatmaps).length > 0) {
+            const detected = Object.entries(data.detections)
+                .filter(([p, prob]) => prob >= 0.5)
+                .map(([p]) => p);
+
+            if (detected.length > 0) {
+                const heatmapSection = document.createElement('div');
+                heatmapSection.style.cssText = 'margin-top:16px;';
+                heatmapSection.innerHTML = `
+                    <div style="font-size:0.85rem; font-weight:600; color:#2C2C2C; 
+                                margin-bottom:10px;">
+                        <i class="fas fa-fire me-1" style="color:#E07B4F;"></i>
+                        Grad-CAM Heatmaps
+                    </div>
+                    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                        ${detected.map(p => data.heatmaps[p] ? `
+                            <div style="text-align:center;">
+                                <img src="data:image/png;base64,${data.heatmaps[p]}"
+                                    style="width:120px; height:120px; object-fit:cover;
+                                            border-radius:8px; cursor:zoom-in;"
+                                    onclick="openLightbox(this.src)">
+                                <div style="font-size:0.75rem; color:#6B6B6B; margin-top:4px;">
+                                    ${p.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}
+                                </div>
+                            </div>` : '').join('')}
+                    </div>`;
+                document.getElementById('soReportCard').before(heatmapSection);
+            }
+        }
+
+        // Show report
+        showToast('Analysis complete!', 'success');
+        document.getElementById('soReportCard').style.display = 'block';
+        const reportEl = document.getElementById('soReportContent');
+        if (typeof data.report === 'object') {
+            reportEl.innerHTML = marked.parse(typeof data.report === 'object' ? 
+                'FINDINGS:\n' + (data.report.findings || '') + 
+                '\n\nIMPRESSION:\n' + (data.report.impression || '') : 
+                data.report || '');
+        } else {
+            reportEl.textContent = data.report || '';
+        }
+
+        // Save second opinion results
+        PATHOLOGIES.forEach(p => {
+            const studentSaid = studentDiagnosis[p] || false;
+            const aiSaid = (data.detections[p] || 0) >= 0.5;
+            fetch('/api/second-opinion/save?' + new URLSearchParams({
+                pathology: p,
+                student_correct: studentSaid === aiSaid
+            }), { method: 'POST' });
+        });
+
+    } catch (err) {
+        showToast('Analysis failed: ' + err.message, 'error');
+    } finally {
+        document.getElementById('spinner').classList.remove('active');
+    }
+}
+
+// ── PDF Download ──────────────────────────────────────
+async function downloadPDF() {
+    if (!analysisData || !currentFile) {
+        showToast('Please run an analysis first.', 'warning');
+        return;
+    }
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Generating...';
+
+    try {
+        // Convert image to base64
+        const imageB64 = await fileToBase64(currentFile);
+
+        const res = await fetch('/api/generate-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_b64: imageB64,
+                detections: analysisData.detections,
+                report: analysisData.report,
+                threshold: threshold
+            })
+        });
+
+        if (!res.ok) throw new Error('PDF generation failed');
+
+        // Trigger download
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'medstep_report.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('PDF downloaded successfully!', 'success');
+
+    } catch (err) {
+        showToast('PDF generation failed: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-download me-1"></i>Download PDF';
+    }
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+</script>
+{% endblock %}

@@ -28,6 +28,7 @@ test_heatmap_output.png
 
 # Old version
 v1.0.1/
+archive/
 
 #Evaluation Result
 evaluation/gradcam_results/

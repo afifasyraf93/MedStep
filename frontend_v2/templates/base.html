@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MedStep{% endblock %} | MedStep</title>
+
+    <!-- Bootstrap 5.3 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6.4 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/custom.css" rel="stylesheet">
+
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<div id="app-wrapper">
+
+    {% if request.cookies.get('token') %}
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <span class="brand-icon">🫁</span>
+            <span class="brand-name">MedStep</span>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="nav-item {% if request.url.path == '/dashboard' %}active{% endif %}">
+                <i class="fas fa-chart-line"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="/analysis" class="nav-item {% if request.url.path == '/analysis' %}active{% endif %}">
+                <i class="fas fa-microscope"></i>
+                <span>Analysis</span>
+            </a>
+            <a href="/library" class="nav-item {% if request.url.path == '/library' %}active{% endif %}">
+                <i class="fas fa-book-medical"></i>
+                <span>Case Library</span>
+            </a>
+            <a href="/encyclopedia" class="nav-item {% if request.url.path == '/encyclopedia' %}active{% endif %}">
+                <i class="fas fa-stethoscope"></i>
+                <span>Encyclopedia</span>
+            </a>
+            <a href="/history" class="nav-item {% if request.url.path == '/history' %}active{% endif %}">
+                <i class="fas fa-clock-rotate-left"></i>
+                <span>History</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <i class="fas fa-user-circle"></i>
+                <span>{{ request.cookies.get('username', 'User') }}</span>
+            </div>
+            <a href="/logout" class="logout-btn">
+                <i class="fas fa-right-from-bracket"></i>
+                <span>Logout</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Wrapper -->
+    <div class="main-wrapper" id="mainWrapper">
+        <!-- Top Navbar -->
+        <nav class="top-navbar">
+            <button class="sidebar-toggle" onclick="toggleSidebar()">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="navbar-title">{% block page_title %}{% endblock %}</div>
+            <div class="navbar-right">
+                <span class="badge bg-primary">
+                    <i class="fas fa-graduation-cap me-1"></i>
+                    Medical Student
+                </span>
+            </div>
+        </nav>
+
+        <!-- Page Content -->
+        <div class="content-wrapper">
+    {% endif %}
+
+            {% block content %}{% endblock %}
+
+    {% if request.cookies.get('token') %}
+        </div>
+
+        <!-- Footer -->
+        <footer class="content-footer">
+            <span>🫁 MedStep v1.0 &nbsp;|&nbsp; UiTM FYP CSP650 &nbsp;|&nbsp; For educational purposes only</span>
+        </footer>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Custom JS -->
+<script src="/static/js/main.js"></script>
+{% block extra_js %}{% endblock %}
+
+<script>
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const wrapper = document.getElementById('mainWrapper');
+    if (sidebar) sidebar.classList.toggle('collapsed');
+    if (wrapper) wrapper.classList.toggle('expanded');
+}
+</script>
+
+</body>
+</html>

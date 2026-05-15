@@ -2,17 +2,24 @@ from sqlalchemy.orm import Session
 from database.db import History
 
 
-def save_history(db: Session, user_id: int, report: str, image_id: str = None):
-    """Create and save a new History row.
-    Return the new History object.
-    """
-    # TODO: create History object with user_id, report, image_id
-    history = History(user_id=user_id, report=report, image_id=image_id)
-    # TODO: db.add, db.commit, db.refresh
+def save_history(db: Session, user_id: int, report: str,
+                 image_id: str = None, case_name: str = None,
+                 patient_ref: str = None, notes: str = None,
+                 detections: str = None, heatmaps_dir: str = None):
+
+    history = History(
+        user_id     = user_id,
+        report      = report,
+        image_id    = image_id,
+        case_name   = case_name,
+        patient_ref = patient_ref,
+        notes       = notes,
+        detections  = detections,
+        heatmaps_dir = heatmaps_dir
+    )
     db.add(history)
     db.commit()
     db.refresh(history)
-    # TODO: return history
     return history
 
 

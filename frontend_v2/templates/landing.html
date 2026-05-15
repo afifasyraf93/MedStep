@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% block title %}Welcome{% endblock %}
+
+{% block extra_css %}
+<style>
+    body { overflow: hidden; }
+
+    .split-container {
+        display: flex;
+        height: 100vh;
+        width: 100%;
+    }
+
+    /* ── Left Panel ── */
+    .split-left {
+        width: 45%;
+        background: 
+            linear-gradient(160deg, rgba(15,41,66,0.52) 0%, rgba(15,41,66,0.45) 50%, rgba(15,41,66,0.52) 100%),
+            url('http://localhost:8000/image?path=CheXpert-v1.0-small/train/patient00001/study1/view1_frontal.jpg');
+        background-size: cover;
+        background-position: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 48px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .split-left::before {
+        content: '';
+        position: absolute;
+        width: 400px; height: 400px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.04);
+        top: -100px; left: -100px;
+    }
+
+    .split-left::after {
+        content: '';
+        position: absolute;
+        width: 300px; height: 300px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.04);
+        bottom: -80px; right: -80px;
+    }
+
+    .left-content {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        color: white;
+    }
+
+    .left-icon {
+        font-size: 5rem;
+        margin-bottom: 24px;
+        display: block;
+        filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
+    }
+
+    .left-title {
+        font-size: 3rem;
+        font-weight: 700;
+        margin-bottom: 12px;
+        letter-spacing: -0.5px;
+    }
+
+    .left-subtitle {
+        font-size: 1rem;
+        opacity: 0.85;
+        line-height: 1.6;
+        max-width: 320px;
+        margin: 0 auto 32px;
+    }
+
+    .left-stats {
+        display: flex;
+        gap: 24px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .stat-item {
+        text-align: center;
+        background: rgba(255,255,255,0.1);
+        border-radius: 10px;
+        padding: 12px 20px;
+        backdrop-filter: blur(4px);
+    }
+
+    .stat-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        display: block;
+    }
+
+    .stat-label {
+        font-size: 0.7rem;
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* ── Right Panel ── */
+    .split-right {
+        width: 55%;
+        background: #F0EAE0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 48px 64px;
+        overflow-y: auto;
+    }
+
+    .right-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #2C2C2C;
+        margin-bottom: 8px;
+    }
+
+    .right-subtitle {
+        color: #6B6B6B;
+        margin-bottom: 36px;
+        font-size: 0.95rem;
+    }
+
+    .feature-list {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: 40px;
+    }
+
+    .feature-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 16px;
+        background: white;
+        border-radius: 10px;
+        border: 1px solid #E0D8CE;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .feature-item:hover {
+        transform: translateX(4px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .feature-icon {
+        width: 42px; height: 42px;
+        border-radius: 10px;
+        background: rgba(46,107,138,0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        flex-shrink: 0;
+    }
+
+    .feature-title {
+        font-weight: 600;
+        color: #2E6B8A;
+        font-size: 0.95rem;
+        margin-bottom: 2px;
+    }
+
+    .feature-desc {
+        font-size: 0.82rem;
+        color: #6B6B6B;
+        line-height: 1.4;
+    }
+
+    .cta-group {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 24px;
+    }
+
+    .btn-cta-primary {
+        flex: 1;
+        padding: 14px;
+        background: #2E6B8A;
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        text-decoration: none;
+        text-align: center;
+        transition: background 0.2s;
+    }
+
+    .btn-cta-primary:hover {
+        background: #245a75;
+        color: white;
+    }
+
+    .btn-cta-secondary {
+        flex: 1;
+        padding: 14px;
+        background: transparent;
+        color: #2E6B8A;
+        border: 2px solid #2E6B8A;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        text-decoration: none;
+        text-align: center;
+        transition: all 0.2s;
+    }
+
+    .btn-cta-secondary:hover {
+        background: #2E6B8A;
+        color: white;
+    }
+
+    .disclaimer {
+        font-size: 0.72rem;
+        color: #9B9B9B;
+        text-align: center;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .split-container { flex-direction: column; }
+        .split-left { width: 100%; height: 40vh; padding: 32px; }
+        .split-right { width: 100%; padding: 32px; }
+        body { overflow: auto; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="split-container">
+
+    <!-- Left Panel -->
+    <div class="split-left">
+        <div class="left-content">
+            <span class="left-icon">🫁</span>
+            <h1 class="left-title">MedStep</h1>
+            <p class="left-subtitle">
+                AI-powered chest X-ray interpretation designed to help medical students learn radiology with confidence
+            </p>
+            <div class="left-stats">
+                <div class="stat-item">
+                    <span class="stat-value">75,652</span>
+                    <span class="stat-label">Training Images</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">0.788</span>
+                    <span class="stat-label">Macro AUC</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">6</span>
+                    <span class="stat-label">Pathologies</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="split-right">
+        <h2 class="right-title">Your AI Radiology Tutor</h2>
+        <p class="right-subtitle">
+            Upload a chest X-ray, get instant AI analysis with visual explanations — 
+            and learn from every case.
+        </p>
+
+        <div class="feature-list">
+            <div class="feature-item">
+                <div class="feature-icon">🔬</div>
+                <div>
+                    <div class="feature-title">Smart Detection</div>
+                    <div class="feature-desc">
+                        DenseNet121 detects pneumonia, cardiomegaly, pleural effusion, 
+                        pneumothorax, atelectasis and lung mass with AUC ≥ 0.70
+                    </div>
+                </div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">🗺️</div>
+                <div>
+                    <div class="feature-title">Grad-CAM Visual Explanation</div>
+                    <div class="feature-desc">
+                        Heatmaps highlight the exact regions the AI focused on — 
+                        so you understand why, not just what
+                    </div>
+                </div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">🩺</div>
+                <div>
+                    <div class="feature-title">Second Opinion Mode</div>
+                    <div class="feature-desc">
+                        Make your own diagnosis first, then compare with the AI — 
+                        track your accuracy over time
+                    </div>
+                </div>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">📚</div>
+                <div>
+                    <div class="feature-title">Case Library & Encyclopedia</div>
+                    <div class="feature-desc">
+                        Browse 100 real cases filtered by pathology, with 
+                        AI-generated educational content for each condition
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="cta-group">
+            <a href="/login" class="btn-cta-primary">Get Started</a>
+            <a href="/login?tab=register" class="btn-cta-secondary">Register Free</a>
+        </div>
+
+        <p class="disclaimer">
+            For educational purposes only — not a substitute for professional medical diagnosis.<br>
+            UiTM Final Year Project CSP650
+        </p>
+    </div>
+
+</div>
+{% endblock %}

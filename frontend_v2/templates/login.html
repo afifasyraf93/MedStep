@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+
+{% block extra_css %}
+<style>
+    .login-wrapper {
+        min-height: 100vh;
+        background: #F0EAE0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+    }
+
+    .login-card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        width: 100%;
+        max-width: 420px;
+        padding: 40px;
+    }
+
+    .login-logo {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+
+    .login-logo .icon { font-size: 2.5rem; }
+
+    .login-logo h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #2E6B8A;
+        margin: 8px 0 4px;
+    }
+
+    .login-logo p {
+        font-size: 0.85rem;
+        color: #6B6B6B;
+    }
+
+    .nav-tabs {
+        border-bottom: 2px solid #E0D8CE;
+        margin-bottom: 24px;
+    }
+
+    .nav-tabs .nav-link {
+        color: #6B6B6B;
+        border: none;
+        padding: 10px 24px;
+        font-weight: 500;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+    }
+
+    .nav-tabs .nav-link.active {
+        color: #2E6B8A;
+        border-bottom: 2px solid #2E6B8A;
+        background: transparent;
+    }
+
+    .form-label {
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #2C2C2C;
+        margin-bottom: 6px;
+    }
+
+    .form-control {
+        border: 1px solid #E0D8CE;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 0.9rem;
+        background: #FAFAF8;
+        transition: border-color 0.2s;
+    }
+
+    .form-control:focus {
+        border-color: #2E6B8A;
+        box-shadow: 0 0 0 3px rgba(46,107,138,0.1);
+        background: white;
+    }
+
+    .btn-login {
+        width: 100%;
+        padding: 12px;
+        background: #2E6B8A;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+        margin-top: 8px;
+    }
+
+    .btn-login:hover { background: #245a75; }
+
+    .back-link {
+        text-align: center;
+        margin-top: 20px;
+        font-size: 0.82rem;
+        color: #6B6B6B;
+    }
+
+    .back-link a {
+        color: #2E6B8A;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .back-link a:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-wrapper">
+    <div class="login-card">
+
+        <!-- Logo -->
+        <div class="login-logo">
+            <div class="icon">🫁</div>
+            <h1>MedStep</h1>
+            <p>AI-Assisted Chest X-Ray Interpretation</p>
+        </div>
+
+        <!-- Alerts -->
+        {% if error %}
+        <div class="alert alert-danger py-2 px-3 mb-3" style="font-size:0.85rem; border-radius:8px;">
+            <i class="fas fa-circle-exclamation me-2"></i>{{ error }}
+        </div>
+        {% endif %}
+
+        {% if success %}
+        <div class="alert alert-success py-2 px-3 mb-3" style="font-size:0.85rem; border-radius:8px;">
+            <i class="fas fa-circle-check me-2"></i>{{ success }}
+        </div>
+        {% endif %}
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs" id="authTabs">
+            <li class="nav-item">
+                <button class="nav-link {% if not request.query_params.get('tab') or request.query_params.get('tab') == 'login' %}active{% endif %}"
+                        onclick="switchTab('login')">
+                    Login
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link {% if request.query_params.get('tab') == 'register' %}active{% endif %}"
+                        onclick="switchTab('register')">
+                    Register
+                </button>
+            </li>
+        </ul>
+
+        <!-- Login Form -->
+        <div id="loginForm" class="{% if request.query_params.get('tab') == 'register' %}d-none{% endif %}">
+            <form method="post" action="/login">
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" name="username" class="form-control"
+                           placeholder="Enter your username" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control"
+                           placeholder="Enter your password" required>
+                </div>
+                <button type="submit" class="btn-login">
+                    <i class="fas fa-right-to-bracket me-2"></i>Login
+                </button>
+            </form>
+        </div>
+
+        <!-- Register Form -->
+        <div id="registerForm" class="{% if not request.query_params.get('tab') == 'register' %}d-none{% endif %}">
+            <form method="post" action="/register">
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" name="username" class="form-control"
+                           placeholder="Choose a username" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Email</label>
+                    <input type="email" name="email" class="form-control"
+                           placeholder="Enter your email" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control"
+                           placeholder="Choose a password" required>
+                </div>
+                <button type="submit" class="btn-login">
+                    <i class="fas fa-user-plus me-2"></i>Register
+                </button>
+            </form>
+        </div>
+
+        <div class="back-link">
+            <a href="/"><i class="fas fa-arrow-left me-1"></i>Back to Home</a>
+        </div>
+
+    </div>
+</div>
+
+<script>
+function switchTab(tab) {
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const tabs = document.querySelectorAll('.nav-link');
+
+    if (tab === 'login') {
+        loginForm.classList.remove('d-none');
+        registerForm.classList.add('d-none');
+        tabs[0].classList.add('active');
+        tabs[1].classList.remove('active');
+    } else {
+        loginForm.classList.add('d-none');
+        registerForm.classList.remove('d-none');
+        tabs[0].classList.remove('active');
+        tabs[1].classList.add('active');
+    }
+}
+</script>
+{% endblock %}

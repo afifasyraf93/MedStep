@@ -2,7 +2,7 @@ import pandas as pd
 from database.db import init_db, SessionLocal, CXRCase
 
 CHEXPERT_CSV = "data/CheXpert-v1.0-small/train.csv"
-SAMPLE_SIZE  = 100
+SAMPLE_SIZE  = 500
 
 LABEL_COLUMNS = [
     "pneumonia", "cardiomegaly", "pleural_effusion",

@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .section-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #2C2C2C;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Welcome Row -->
+<div class="d-flex align-items-center justify-content-between mb-4 pb-3"
+     style="border-bottom: 1px solid #E0D8CE;">
+    <div>
+        <h4 class="mb-1" style="font-weight:700; color:#2C2C2C;">
+            👋 Welcome back, {{ progress.username if progress else username }}!
+        </h4>
+        <p class="mb-0" style="color:#6B6B6B; font-size:0.9rem;">
+            Here's your learning progress overview
+        </p>
+    </div>
+    <a href="/analysis" class="btn btn-primary btn-sm px-4">
+        <i class="fas fa-microscope me-2"></i>New Analysis
+    </a>
+</div>
+
+<!-- Metric Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="metric-card">
+            <div class="metric-icon" style="background:rgba(46,107,138,0.1); color:#2E6B8A;">
+                <i class="fas fa-x-ray"></i>
+            </div>
+            <div>
+                <div class="metric-value">{{ progress.analyses_count if progress else 0 }}</div>
+                <div class="metric-label">Total Analyses</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="metric-card">
+            <div class="metric-icon" style="background:rgba(231,121,79,0.1); color:#E07B4F;">
+                <i class="fas fa-fire"></i>
+            </div>
+            <div>
+                <div class="metric-value">{{ progress.streak_days if progress else 0 }} 🔥</div>
+                <div class="metric-label">Day Streak</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="metric-card">
+            <div class="metric-icon" style="background:rgba(76,175,125,0.1); color:#4CAF7D;">
+                <i class="fas fa-calendar-check"></i>
+            </div>
+            <div>
+                <div class="metric-value" style="font-size:1.1rem;">
+                    {{ progress.last_active[:10] if progress and progress.last_active else 'Never' }}
+                </div>
+                <div class="metric-label">Last Active</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 1 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-bar me-2"></i>Model AUC per Pathology
+            </div>
+            <div class="card-body">
+                <div id="aucChart" style="height:280px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-spider me-2"></i>Model Comparison — AUC Radar
+            </div>
+            <div class="card-body">
+                <div id="radarChart" style="height:280px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 2 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-column me-2"></i>Model Comparison — Macro AUC
+            </div>
+            <div class="card-body">
+                <div id="modelChart" style="height:280px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-pie me-2"></i>Pathology Distribution
+            </div>
+            <div class="card-body">
+                <div id="pieChart" style="height:280px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 3 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-database me-2"></i>Dataset Distribution
+            </div>
+            <div class="card-body">
+                <div id="datasetChart" style="height:280px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-graduation-cap me-2"></i>Your Diagnostic Accuracy
+            </div>
+            <div class="card-body">
+                <div id="accuracyChart" style="height:280px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Analysis Timeline -->
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-line me-2"></i>Your Analysis Timeline
+            </div>
+            <div class="card-body">
+                <div id="timelineChart" style="height:220px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- ECharts -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+const TOKEN = "{{ request.cookies.get('token') }}";
+const API = "http://localhost:8000";
+
+// ── AUC Bar Chart ────────────────────────────────────
+const aucChart = echarts.init(document.getElementById('aucChart'));
+aucChart.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: {
+        type: 'category',
+        data: ['Pneumonia','Cardiomegaly','Pleural Effusion','Pneumothorax','Atelectasis','Lung Mass'],
+        axisLabel: { rotate: 15, fontSize: 11 }
+    },
+    yAxis: { type: 'value', min: 0, max: 1, name: 'AUC' },
+    series: [{
+        type: 'bar',
+        data: [0.7279, 0.8436, 0.8544, 0.7930, 0.7120, 0.7971],
+        itemStyle: { color: '#2E6B8A', borderRadius: [4,4,0,0] },
+        markLine: {
+            data: [{ yAxis: 0.70 }],
+            lineStyle: { color: '#E07B4F', type: 'dashed' },
+            label: { formatter: 'Min 0.70' }
+        }
+    }]
+});
+
+// ── Radar Chart ──────────────────────────────────────
+const radarChart = echarts.init(document.getElementById('radarChart'));
+radarChart.setOption({
+    tooltip: {},
+    legend: { data: ['DenseNet121','ResNet50','EfficientNetB0','MobileNetV3'],
+              bottom: 0, textStyle: { fontSize: 10 } },
+    radar: {
+        indicator: [
+            { name: 'Pneumonia', max: 1 },
+            { name: 'Cardiomegaly', max: 1 },
+            { name: 'Pleural Eff.', max: 1 },
+            { name: 'Pneumothorax', max: 1 },
+            { name: 'Atelectasis', max: 1 },
+            { name: 'Lung Mass', max: 1 }
+        ],
+        radius: '60%'
+    },
+    series: [{
+        type: 'radar',
+        data: [
+            { value: [0.7279,0.8436,0.8544,0.7930,0.7120,0.7971],
+              name: 'DenseNet121',
+              areaStyle: { opacity: 0.15 },
+              lineStyle: { color: '#2E6B8A' },
+              itemStyle: { color: '#2E6B8A' } },
+            { value: [0.7099,0.8559,0.8556,0.7992,0.7086,0.7994],
+              name: 'ResNet50',
+              areaStyle: { opacity: 0.1 },
+              lineStyle: { color: '#4CAF7D' },
+              itemStyle: { color: '#4CAF7D' } },
+            { value: [0.7167,0.8388,0.8405,0.7818,0.7066,0.7916],
+              name: 'EfficientNetB0',
+              areaStyle: { opacity: 0.1 },
+              lineStyle: { color: '#E07B4F' },
+              itemStyle: { color: '#E07B4F' } },
+            { value: [0.6976,0.8243,0.8283,0.7713,0.7028,0.7781],
+              name: 'MobileNetV3',
+              areaStyle: { opacity: 0.1 },
+              lineStyle: { color: '#9B59B6' },
+              itemStyle: { color: '#9B59B6' } }
+        ]
+    }]
+});
+
+// ── Model Comparison ─────────────────────────────────
+const modelChart = echarts.init(document.getElementById('modelChart'));
+modelChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['CheXpert','NIH','Combined'], bottom: 0,
+              textStyle: { fontSize: 10 } },
+    xAxis: { type: 'category',
+             data: ['DenseNet121','ResNet50','EfficientNetB0','MobileNetV3'],
+             axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', min: 0.68, max: 0.80, name: 'Macro AUC' },
+    series: [
+        { name: 'CheXpert', type: 'bar',
+          data: [0.766,0.768,0.758,0.745],
+          itemStyle: { color: '#E07B4F', borderRadius: [4,4,0,0] } },
+        { name: 'NIH', type: 'bar',
+          data: [0.782,0.780,0.774,0.764],
+          itemStyle: { color: '#4CAF7D', borderRadius: [4,4,0,0] } },
+        { name: 'Combined', type: 'bar',
+          data: [0.7873,0.7881,0.7793,0.7671],
+          itemStyle: { color: '#2E6B8A', borderRadius: [4,4,0,0] } }
+    ]
+});
+
+// ── Dataset Distribution ──────────────────────────────
+const datasetChart = echarts.init(document.getElementById('datasetChart'));
+datasetChart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['Train','Test'], bottom: 0 },
+    xAxis: { type: 'category', data: ['CheXpert','NIH','Combined'] },
+    yAxis: { type: 'value', name: 'Images' },
+    series: [
+        { name: 'Train', type: 'bar',
+          data: [48005,12508,60586],
+          itemStyle: { color: '#4CAF7D', borderRadius: [4,4,0,0] } },
+        { name: 'Test', type: 'bar',
+          data: [11995,3144,15066],
+          itemStyle: { color: '#2E6B8A', borderRadius: [4,4,0,0] } }
+    ]
+});
+
+// ── Pathology Distribution Pie ────────────────────────
+fetch(`/api/library/stats`)
+    .then(r => r.json())
+    .then(stats => {
+        const pieChart = echarts.init(document.getElementById('pieChart'));
+        pieChart.setOption({
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { orient: 'vertical', right: 0,
+                      textStyle: { fontSize: 10 } },
+            series: [{
+                type: 'pie',
+                radius: ['40%', '70%'],
+                center: ['40%', '50%'],
+                data: Object.entries(stats).map(([k, v]) => ({
+                    name: k.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase()),
+                    value: v
+                })),
+                emphasis: { itemStyle: { shadowBlur: 10 } },
+                label: { show: false }
+            }]
+        });
+    });
+
+// ── Second Opinion Accuracy ───────────────────────────
+fetch(`/api/second-opinion/stats`, {
+    headers: { 'token': TOKEN }
+})
+.then(r => r.json())
+.then(data => {
+    const accuracyChart = echarts.init(document.getElementById('accuracyChart'));
+    const hasData = Object.values(data).some(v => v > 0);
+    if (hasData) {
+        accuracyChart.setOption({
+            tooltip: { trigger: 'axis', formatter: '{b}: {c}%' },
+            xAxis: {
+                type: 'category',
+                data: Object.keys(data).map(k =>
+                    k.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase())),
+                axisLabel: { rotate: 15, fontSize: 10 }
+            },
+            yAxis: { type: 'value', min: 0, max: 100, name: '%' },
+            series: [{
+                type: 'bar',
+                data: Object.values(data),
+                itemStyle: { color: '#4CAF7D', borderRadius: [4,4,0,0] },
+                markLine: {
+                    data: [{ yAxis: 50 }],
+                    lineStyle: { color: '#E07B4F', type: 'dashed' },
+                    label: { formatter: '50% baseline' }
+                }
+            }]
+        });
+    } else {
+        document.getElementById('accuracyChart').innerHTML =
+            '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#6B6B6B;font-size:0.85rem;">Use Second Opinion mode to track your accuracy</div>';
+    }
+});
+
+// ── Analysis Timeline ─────────────────────────────────
+fetch(`/api/history`, { headers: { 'token': TOKEN } })
+.then(r => r.json())
+.then(data => {
+    const history = data.history || [];
+    const analysis = history.filter(h =>
+        !h.report || !h.report.startsWith('SECOND_OPINION'));
+
+    if (analysis.length > 0) {
+        const counts = {};
+        analysis.forEach(h => {
+            const date = h.timestamp.slice(0, 10);
+            counts[date] = (counts[date] || 0) + 1;
+        });
+        const dates = Object.keys(counts).sort();
+        const timelineChart = echarts.init(document.getElementById('timelineChart'));
+        timelineChart.setOption({
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: dates,
+                     axisLabel: { rotate: 15, fontSize: 10 } },
+            yAxis: { type: 'value', name: 'Analyses', minInterval: 1 },
+            series: [{
+                type: 'line', smooth: true,
+                data: dates.map(d => counts[d]),
+                itemStyle: { color: '#2E6B8A' },
+                areaStyle: { color: 'rgba(46,107,138,0.15)' }
+            }]
+        });
+    } else {
+        document.getElementById('timelineChart').innerHTML =
+            '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#6B6B6B;font-size:0.85rem;">No analysis history yet</div>';
+    }
+});
+
+// Resize charts on window resize
+window.addEventListener('resize', () => {
+    [aucChart, radarChart, modelChart, datasetChart].forEach(c => c.resize());
+});
+</script>
+{% endblock %}

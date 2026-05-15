@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block page_title %}History{% endblock %}
+
+{% block extra_css %}
+<style>
+    .history-card {
+        background: white;
+        border: 1px solid #E0D8CE;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        overflow: hidden;
+        transition: box-shadow 0.2s;
+    }
+
+    .history-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+    .history-header {
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .history-header:hover { background: #FAFAF8; }
+
+    .history-date {
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: #2C2C2C;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .history-body {
+        display: none;
+        padding: 16px 20px;
+        border-top: 1px solid #F0EAE0;
+    }
+
+    .history-body.open { display: block; }
+
+    .report-text {
+        background: #FAFAF8;
+        border: 1px solid #E0D8CE;
+        border-radius: 8px;
+        padding: 16px;
+        font-size: 0.85rem;
+        line-height: 1.7;
+        color: #2C2C2C;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .btn-delete {
+        padding: 4px 12px;
+        border-radius: 6px;
+        border: 1px solid #fca5a5;
+        background: transparent;
+        color: #dc2626;
+        font-size: 0.78rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-delete:hover {
+        background: #fee2e2;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 80px 20px;
+        color: #6B6B6B;
+    }
+
+    .summary-row {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+    }
+
+    .summary-pill {
+        background: white;
+        border: 1px solid #E0D8CE;
+        border-radius: 20px;
+        padding: 8px 20px;
+        font-size: 0.85rem;
+        color: #2C2C2C;
+    }
+
+    .summary-pill strong { color: #2E6B8A; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if history %}
+<!-- Summary -->
+<div class="summary-row">
+    <div class="summary-pill">
+        Total: <strong>{{ history|length }}</strong> analyses
+    </div>
+    <div class="summary-pill">
+        Latest: <strong>{{ history[0].timestamp[:10] }}</strong>
+    </div>
+</div>
+
+{% for h in history %}
+<div class="history-card" id="card_{{ h.history_id }}">
+    <div class="history-header" onclick="toggleHistory({{ h.history_id }})">
+        <div class="history-date">
+            <i class="fas fa-file-medical" style="color:#2E6B8A;"></i>
+
+            {% if h.case_name %}
+                {% if h.case_name == 'Second Opinion' %}
+                    📋 {{ h.timestamp[:10] }}
+                    <span style="font-size:0.72rem; padding:2px 8px; border-radius:10px;
+                        background:#fef3c7; color:#d97706; margin-left:6px;">
+                        🩺 Second Opinion
+                    </span>
+                {% else %}
+                    <span style="color:#2E6B8A; font-weight:600;">{{ h.case_name }}</span>
+                    {% if h.patient_ref %}
+                    <span style="font-size:0.78rem; color:#6B6B6B; font-weight:400;">
+                        · {{ h.patient_ref }}
+                    </span>
+                    {% endif %}
+                {% endif %}
+            {% else %}
+                📋 {{ h.timestamp[:10] }}
+            {% endif %}
+
+            <span style="font-weight:400; color:#6B6B6B; font-size:0.78rem;">
+                {{ h.timestamp[11:16] if h.timestamp|length > 10 else '' }}
+            </span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <!-- Top detection badge -->
+            {% if h.detections %}
+                {% set det = h.detections | tojson %}
+                <span style="font-size:0.75rem; padding:2px 8px; border-radius:10px;
+                      background:#E6F1FB; color:#2E6B8A;">
+                    <i class="fas fa-chart-bar me-1"></i>
+                    {{ h.timestamp[:10] }}
+                </span>
+            {% endif %}
+            <button class="btn-delete"
+                    onclick="deleteHistory(event, {{ h.history_id }})">
+                <i class="fas fa-trash-can me-1"></i>Delete
+            </button>
+            <i class="fas fa-chevron-down" id="chevron_{{ h.history_id }}"
+               style="color:#6B6B6B; font-size:0.8rem; transition: transform 0.2s;"></i>
+        </div>
+    </div>
+
+    <div class="history-body" id="body_{{ h.history_id }}">
+
+        <!-- Case metadata -->
+        {% if h.patient_ref or h.notes %}
+        <div style="background:#F0EAE0; border-radius:8px; padding:12px 16px;
+                    margin-bottom:12px; font-size:0.85rem;">
+            {% if h.patient_ref %}
+            <div style="margin-bottom:4px;">
+                <i class="fas fa-user me-2" style="color:#2E6B8A;"></i>
+                <strong>Patient Ref:</strong> {{ h.patient_ref }}
+            </div>
+            {% endif %}
+            {% if h.notes %}
+            <div>
+                <i class="fas fa-note-sticky me-2" style="color:#2E6B8A;"></i>
+                <strong>Notes:</strong> {{ h.notes }}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Detections summary -->
+        {% if h.detections %}
+        <div style="margin-bottom:12px;">
+            <div style="font-size:0.82rem; font-weight:600; color:#2C2C2C; margin-bottom:8px;">
+                <i class="fas fa-chart-bar me-1" style="color:#2E6B8A;"></i>
+                Detection Results
+            </div>
+            <div id="detections_{{ h.history_id }}" 
+                 data-detections="{{ h.detections }}"
+                 style="display:flex; flex-wrap:wrap; gap:6px;">
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Heatmaps -->
+        {% if h.heatmaps_dir %}
+        <div style="margin-bottom:12px;">
+            <div style="font-size:0.82rem; font-weight:600; color:#2C2C2C; margin-bottom:8px;">
+                <i class="fas fa-fire me-1" style="color:#E07B4F;"></i>
+                Grad-CAM Heatmaps
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;"
+                 id="heatmaps_{{ h.history_id }}"
+                 data-dir="{{ h.heatmaps_dir }}">
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- AI Report -->
+        <div style="font-size:0.82rem; font-weight:600; color:#2C2C2C; margin-bottom:8px;">
+            <i class="fas fa-file-medical me-1" style="color:#2E6B8A;"></i>
+            AI Report
+        </div>
+        <div class="report-text" id="report_{{ h.history_id }}" 
+            data-report="{{ h.report | e }}">
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+    <i class="fas fa-clock-rotate-left fa-3x mb-3" style="opacity:0.2;"></i>
+    <h5 style="color:#2C2C2C;">No analyses yet</h5>
+    <p style="font-size:0.9rem;">Go to Analysis to get started</p>
+    <a href="/analysis" class="btn btn-primary btn-sm mt-2">
+        <i class="fas fa-microscope me-2"></i>Start Analysis
+    </a>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleHistory(id) {
+    const body = document.getElementById('body_' + id);
+    const chevron = document.getElementById('chevron_' + id);
+    body.classList.toggle('open');
+    chevron.style.transform = body.classList.contains('open') ?
+        'rotate(180deg)' : 'rotate(0deg)';
+
+    if (body.classList.contains('open')) {
+        renderHistoryDetections(id);
+        renderHistoryHeatmaps(id);
+        renderHistoryReport(id);
+    }
+}
+
+function renderHistoryDetections(id) {
+    const el = document.getElementById('detections_' + id);
+    if (!el || el.children.length > 0) return;
+
+    try {
+        const detections = JSON.parse(el.dataset.detections);
+        Object.entries(detections).forEach(([p, prob]) => {
+            const sev = getSeverity(prob);
+            const detected = prob >= 0.5;
+            const badge = document.createElement('span');
+            badge.style.cssText = `
+                padding: 3px 10px; border-radius: 10px; font-size: 0.78rem;
+                font-weight: 500; background: ${detected ? sev.bg : '#f0f0f0'};
+                color: ${detected ? sev.color : '#9B9B9B'};
+            `;
+            badge.textContent = `${detected ? '✅' : '⬜'} ${p.replace(/_/g,' ').replace(/\b\w/g, l=>l.toUpperCase())} ${Math.round(prob*100)}%`;
+            el.appendChild(badge);
+        });
+    } catch(e) {}
+}
+
+function renderHistoryHeatmaps(id) {
+    const el = document.getElementById('heatmaps_' + id);
+    if (!el || el.children.length > 0) return;
+
+    const dir = el.dataset.dir;
+    if (!dir) return;
+
+    const pathologies = ['pneumonia','cardiomegaly','pleural_effusion',
+                         'pneumothorax','atelectasis','lung_mass'];
+
+    pathologies.forEach(p => {
+        const imgUrl = `http://localhost:8000/heatmap?dir=${encodeURIComponent(dir)}&pathology=${p}`;
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'text-align:center;';
+        wrapper.innerHTML = `
+            <img src="${imgUrl}"
+                 style="width:100px; height:100px; object-fit:cover;
+                        border-radius:6px; cursor:zoom-in;"
+                 onclick="openLightbox(this.src)"
+                 onerror="this.parentElement.style.display='none'">
+            <div style="font-size:0.7rem; color:#6B6B6B; margin-top:3px;">
+                ${p.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}
+            </div>
+        `;
+        el.appendChild(wrapper);
+    });
+}
+
+function renderHistoryReport(id) {
+    const el = document.getElementById('report_' + id);
+    if (!el || el.textContent.trim()) return;
+
+    const raw = el.dataset.report;
+    if (!raw) { el.textContent = 'No report available.'; return; }
+
+    try {
+        const report = JSON.parse(raw);
+        el.innerHTML = 
+            '<strong>FINDINGS:</strong><br>' +
+            (report.findings || '') +
+            '<br><br><strong>IMPRESSION:</strong><br>' +
+            (report.impression || '');
+    } catch {
+        // Try Python dict format
+        try {
+            const findingsMatch = raw.match(/['"]findings['"]\s*:\s*['"](.+?)['"]\s*,\s*['"]impression/s);
+            const impressionMatch = raw.match(/['"]impression['"]\s*:\s*['"](.+?)['"]\s*[,}]/s);
+            
+            const findings = findingsMatch ? findingsMatch[1] : '';
+            const impression = impressionMatch ? impressionMatch[1] : '';
+            
+            if (findings || impression) {
+                el.innerHTML = 
+                    '<strong>FINDINGS:</strong><br>' + findings +
+                    '<br><br><strong>IMPRESSION:</strong><br>' + impression;
+            } else {
+                el.textContent = raw;
+            }
+        } catch {
+            el.textContent = raw;
+        }
+    }
+}
+
+async function deleteHistory(event, id) {
+    event.stopPropagation();
+    if (!window.confirm('Delete this analysis record?')) return;
+
+    const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+        showToast('Analysis record deleted.', 'success');
+        const card = document.getElementById('card_' + id);
+        card.style.opacity = '0';
+        card.style.transition = 'opacity 0.3s';
+        setTimeout(() => card.remove(), 300);
+    } else {
+        showToast('Failed to delete record.', 'error');
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block title %}Encyclopedia{% endblock %}
+{% block page_title %}Pathology Encyclopedia{% endblock %}
+
+{% block extra_css %}
+<style>
+    .pathology-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 24px;
+    }
+
+    .pathology-pill {
+        background: white;
+        border: 2px solid #E0D8CE;
+        border-radius: 12px;
+        padding: 16px 12px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+    }
+
+    .pathology-pill:hover {
+        border-color: #2E6B8A;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .pathology-pill.active {
+        border-color: #2E6B8A;
+        background: rgba(46,107,138,0.05);
+    }
+
+    .pathology-pill .pill-icon { font-size: 1.8rem; margin-bottom: 8px; }
+
+    .pathology-pill .pill-name {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #2C2C2C;
+    }
+
+    .info-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .info-badge {
+        padding: 6px 16px;
+        border-radius: 20px;
+        font-size: 0.82rem;
+        font-weight: 500;
+    }
+
+    .content-box {
+        background: white;
+        border: 1px solid #E0D8CE;
+        border-radius: 12px;
+        padding: 24px;
+        font-size: 0.9rem;
+        line-height: 1.8;
+        color: #2C2C2C;
+        white-space: pre-wrap;
+        min-height: 200px;
+    }
+
+    .related-cases {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-top: 16px;
+    }
+
+    .related-case-img {
+        width: 100%;
+        height: 140px;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #1a1a1a;
+        cursor: zoom-in;
+        transition: transform 0.2s;
+    }
+
+    .related-case-img:hover { transform: scale(1.02); }
+
+    .generating {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 40px;
+        justify-content: center;
+        color: #6B6B6B;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Pathology Selector Grid -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="fas fa-book-medical me-2"></i>Select a Pathology
+    </div>
+    <div class="card-body">
+        <div class="pathology-grid">
+            {% set pathology_info = {
+                'pneumonia':        {'icon': '🫁', 'prevalence': 'Common',      'severity': 'Moderate–High'},
+                'cardiomegaly':     {'icon': '❤️',  'prevalence': 'Common',      'severity': 'Moderate–High'},
+                'pleural_effusion': {'icon': '💧', 'prevalence': 'Common',      'severity': 'Moderate–High'},
+                'pneumothorax':     {'icon': '💨', 'prevalence': 'Less Common', 'severity': 'High'},
+                'atelectasis':      {'icon': '🫧', 'prevalence': 'Common',      'severity': 'Moderate'},
+                'lung_mass':        {'icon': '🔴', 'prevalence': 'Less Common', 'severity': 'High'}
+            } %}
+
+            {% for p, info in pathology_info.items() %}
+            <div class="pathology-pill" id="pill_{{ p }}"
+                onclick="selectPathology('{{ p }}', '{{ info.icon }}', '{{ info.prevalence }}', '{{ info.severity }}')">
+                <div class="pill-icon">{{ info.icon }}</div>
+                <div class="pill-name">{{ p.replace('_',' ').title() }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Content Area -->
+<div id="contentArea" style="display:none;">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>
+                <span id="contentIcon" style="margin-right:8px;"></span>
+                <span id="contentTitle" style="font-weight:700;"></span>
+            </span>
+            <button class="btn btn-primary btn-sm px-3" onclick="generateContent()"
+                    id="generateBtn">
+                <i class="fas fa-wand-magic-sparkles me-1"></i>Generate Content
+            </button>
+        </div>
+        <div class="card-body">
+
+            <!-- Info Badges -->
+            <div class="info-row">
+                <span class="info-badge" style="background:#dcfce7; color:#16a34a;">
+                    <i class="fas fa-chart-bar me-1"></i>
+                    Prevalence: <span id="badgePrevalence"></span>
+                </span>
+                <span class="info-badge" style="background:#fee2e2; color:#dc2626;">
+                    <i class="fas fa-triangle-exclamation me-1"></i>
+                    Severity: <span id="badgeSeverity"></span>
+                </span>
+            </div>
+
+            <!-- Generated Content -->
+            <div id="generatedContent" class="content-box">
+                <div style="text-align:center; padding:40px; color:#6B6B6B;">
+                    <i class="fas fa-wand-magic-sparkles fa-2x mb-3" style="opacity:0.3;"></i>
+                    <p>Click "Generate Content" to get AI-powered educational content</p>
+                </div>
+            </div>
+
+            <!-- Related Cases -->
+            <div id="relatedSection" style="display:none; margin-top:24px;">
+                <h6 style="font-weight:600; color:#2C2C2C; margin-bottom:12px;">
+                    <i class="fas fa-images me-2" style="color:#2E6B8A;"></i>
+                    Related Cases from Library
+                </h6>
+                <div class="related-cases" id="relatedCases"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+<script>
+let selectedPathology = null;
+
+function selectPathology(pathology, icon, prevalence, severity) {
+    // Update active pill
+    document.querySelectorAll('.pathology-pill').forEach(p => p.classList.remove('active'));
+    document.getElementById('pill_' + pathology).classList.add('active');
+
+    selectedPathology = pathology;
+
+    // Update header
+    document.getElementById('contentIcon').textContent = icon;
+    document.getElementById('contentTitle').textContent =
+        pathology.replace(/_/g,' ').replace(/\b\w/g, l => l.toUpperCase());
+    document.getElementById('badgePrevalence').textContent = prevalence;
+    document.getElementById('badgeSeverity').textContent = severity;
+
+    // Reset content
+    document.getElementById('generatedContent').innerHTML = `
+        <div style="text-align:center; padding:40px; color:#6B6B6B;">
+            <i class="fas fa-wand-magic-sparkles fa-2x mb-3" style="opacity:0.3;"></i>
+            <p>Click "Generate Content" to get AI-powered educational content</p>
+        </div>`;
+    document.getElementById('relatedSection').style.display = 'none';
+    document.getElementById('contentArea').style.display = 'block';
+    document.getElementById('contentArea').scrollIntoView({ behavior: 'smooth' });
+    loadRelatedCases(pathology);
+}
+
+async function generateContent() {
+    if (!selectedPathology) return;
+
+    const btn = document.getElementById('generateBtn');
+    const content = document.getElementById('generatedContent');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Generating...';
+    content.innerHTML = `
+        <div class="generating">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <span>Generating educational content...</span>
+        </div>`;
+
+    try {
+        const res = await fetch(`/api/encyclopedia/${selectedPathology}`);
+        const data = await res.json();
+        content.style.whiteSpace = 'pre-wrap';
+        content.style.whiteSpace = 'normal';
+        content.innerHTML = marked.parse(data.content || 'No content generated.');
+    } catch (err) {
+        content.innerHTML = '<p style="color:#dc2626;">Failed to generate content. Please try again.</p>';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-wand-magic-sparkles me-1"></i>Generate Content';
+    }
+}
+
+async function loadRelatedCases(pathology) {
+    try {
+        const res = await fetch(`/api/library?pathologies=${pathology}`);
+        const cases = await res.json();
+        const top3 = cases.slice(0, 3);
+
+        if (top3.length > 0) {
+            document.getElementById('relatedSection').style.display = 'block';
+            const container = document.getElementById('relatedCases');
+            container.innerHTML = top3.map(c => `
+                <div>
+                    <img class="related-case-img"
+                         src="http://localhost:8000/image?path=${c.image_path}"
+                         alt="Related case"
+                         onclick="openLightbox(this.src)">
+                    <div style="font-size:0.78rem; color:#6B6B6B; margin-top:6px;">
+                        ${c.patient_id}
+                    </div>
+                </div>`).join('');
+        }
+    } catch (err) {
+        console.log('Could not load related cases');
+    }
+}
+</script>
+{% endblock %}

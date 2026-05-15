@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi import Request
 from PIL import Image
 import io
+import base64
+import json
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,9 +25,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import auth.auth as auth
 from database.history import save_history, get_history, delete_history
-from database.db import get_db, init_db, CXRCase, User
+from database.db import get_db, init_db, CXRCase, User, History
 from groq import Groq
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 MODEL_PATH  = "models/combined_densenet121_best.pth"
@@ -42,6 +45,14 @@ detection_model.load_state_dict(
     torch.load(MODEL_PATH, map_location=DEVICE))
 detection_model = detection_model.to(DEVICE)
 detection_model.eval()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8501"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 print("Loading retrieval system...")
 faiss_index, metadata, embedder = load_retrieval_system()
@@ -67,14 +78,9 @@ def health():
 
 
 @app.post("/analyze")
-async def analyze(request: Request, db: Session = Depends(get_db), file: UploadFile = File(...)):
-    """Main pipeline endpoint.
-    Accepts a chest X-ray image and returns:
-    - detections: per-pathology probabilities
-    - heatmaps: base64 encoded heatmaps per detected pathology
-    - similar_cases: top-3 FAISS results
-    - report: findings + impression from Groq
-    """
+async def analyze(request: Request, db: Session = Depends(get_db),
+                  file: UploadFile = File(...),
+                  mode: str = "ai"):
     # --- Load and preprocess image ---
     try:
         contents = await file.read()
@@ -124,33 +130,47 @@ async def analyze(request: Request, db: Session = Depends(get_db), file: UploadF
     img.save(temp_path)
     report = generate_report(temp_path, detections)
 
-    # TODO: save to history if token header present (optional for now)
     try:
         token = request.headers.get("token")
         if token:
             user_id = auth.verify_session(db, token)
-            save_history(db, user_id=user_id, report=str(report))
-            
-            # TODO: update user progress
+
+            # Save heatmaps to disk FIRST
+            heatmaps_dir = None
+            if heatmaps:
+                heatmaps_dir = f"uploads/heatmaps/user_{user_id}_{int(datetime.utcnow().timestamp())}"
+                os.makedirs(heatmaps_dir, exist_ok=True)
+                for pathology, b64_str in heatmaps.items():
+                    if b64_str:
+                        img_bytes = base64.b64decode(b64_str)
+                        with open(f"{heatmaps_dir}/{pathology}.png", "wb") as f:
+                            f.write(img_bytes)
+
+            # THEN save history ONCE
+            case_name = "Second Opinion" if mode == "second_opinion" else None
+            save_history(
+                db,
+                user_id      = user_id,
+                report       = str(report),
+                detections   = json.dumps(detections),
+                heatmaps_dir = heatmaps_dir,
+                case_name    = case_name
+            )
+
+            # Update progress
             user = db.query(User).filter(User.user_id == user_id).first()
             user.analyses_count = (user.analyses_count or 0) + 1
-            
-            # TODO: calculate streak
-            # if last_active was yesterday, increment streak
-            # if last_active was today, keep streak
-            # otherwise reset streak to 1
             today = datetime.utcnow().date()
             if user.last_active:
                 last = user.last_active.date()
                 if last == today:
-                    pass  # same day, no change
+                    pass
                 elif (today - last).days == 1:
                     user.streak_days = (user.streak_days or 0) + 1
                 else:
                     user.streak_days = 1
             else:
                 user.streak_days = 1
-            
             user.last_active = datetime.utcnow()
             db.commit()
     except Exception:
@@ -215,34 +235,79 @@ def logout(token: str = Header(...), db: Session = Depends(get_db)):
 
 @app.get("/history")
 def history(token: str = Header(...), db: Session = Depends(get_db)):
-    # TODO: call auth.verify_session(db, token) to get user_id
-    # wrap in try/except ValueError — return {"error": str(e)} with status 400
-    # TODO: call get_history(db, user_id)
-    # return {"history": results}  — but results are ORM objects, not JSON-serializable
-    # hint: return a list of dicts: [{"history_id": h.history_id, "timestamp": str(h.timestamp), "report": h.report} for h in results]
     try:
         user_id = auth.verify_session(db, token)
-        results = get_history(db, user_id)
-        return {"history": [
-            {"history_id": h.history_id, "timestamp": str(h.timestamp), "report": h.report}
-            for h in results
-        ]}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    results = get_history(db, user_id)
+    return {"history": [
+        {
+            "history_id":  h.history_id,
+            "timestamp":   str(h.timestamp),
+            "report":      h.report,
+            "case_name":   h.case_name,
+            "patient_ref": h.patient_ref,
+            "notes":       h.notes,
+            "detections":  h.detections,
+            "heatmaps_dir": h.heatmaps_dir
+        }
+        for h in results
+        if not (h.report and h.report.startswith("SECOND_OPINION"))
+    ]}
 
 
 @app.delete("/history/{history_id}")
 def delete_history_entry(history_id: int, token: str = Header(...), db: Session = Depends(get_db)):
-    # TODO: verify_session to get user_id
-    # TODO: call delete_history(db, history_id, user_id)
-    # return {"deleted": True} or {"deleted": False}
     try:
         user_id = auth.verify_session(db, token)
         deleted = delete_history(db, history_id, user_id)
+
+        if deleted:
+            user = db.query(User).filter(User.user_id == user_id).first()
+            if user and user.analyses_count > 0:
+                user.analyses_count -= 1
+                db.commit()
+
         return {"deleted": deleted}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
+@app.post("/history/{history_id}/update")
+def update_history(
+    history_id: int,
+    case_name: str = "",
+    patient_ref: str = "",
+    notes: str = "",
+    token: str = Header(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        user_id = auth.verify_session(db, token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    h = db.query(History).filter(
+        History.history_id == history_id,
+        History.user_id == user_id
+    ).first()
+
+    if not h:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if case_name: h.case_name = case_name
+    if patient_ref: h.patient_ref = patient_ref
+    if notes: h.notes = notes
+    db.commit()
+    return {"updated": True}    
+
+@app.get("/heatmap")
+def get_heatmap(dir: str, pathology: str):
+    path = os.path.join(dir, f"{pathology}.png")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Heatmap not found")
+    return FileResponse(path)
+
 @app.get("/library")
 def get_library(pathologies: str = "", db: Session = Depends(get_db)):
     # pathologies is a comma-separated string e.g. "pneumonia,cardiomegaly"
@@ -412,9 +477,15 @@ def get_progress(token: str = Header(...), db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
     user = db.query(User).filter(User.user_id == user_id).first()
+    
+    from database.history import get_history
+    history = get_history(db, user_id)
+    actual_count = len([h for h in history 
+                    if not (h.report and h.report.startswith("SECOND_OPINION"))])
+
     return {
         "username":       user.username,
-        "analyses_count": user.analyses_count,
+        "analyses_count": actual_count,
         "streak_days":    user.streak_days,
         "last_active":    str(user.last_active) if user.last_active else None
     }

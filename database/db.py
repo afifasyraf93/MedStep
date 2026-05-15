@@ -10,7 +10,7 @@ Base = declarative_base()
 
 
 class User(Base):
-    __tablename__ = "users"
+    __tablename__   = "users"
 
     user_id         = Column(Integer, primary_key=True, autoincrement=True)
     username        = Column(String(50), unique=True, nullable=False)
@@ -18,57 +18,54 @@ class User(Base):
     password_hash   = Column(String(255), nullable=False)
     role            = Column(String(20), nullable=False, default="student")
     created_at      = Column(DateTime, default=datetime.utcnow)
-    # TODO: add analyses_count — Integer, default=0
     analyses_count  = Column(Integer, default=0)
-    # TODO: add streak_days — Integer, default=0
     streak_days     = Column(Integer, default=0)
-    # TODO: add last_active — DateTime, nullable=True
     last_active     = Column(DateTime, nullable=True)
 
-    # TODO: add relationship to UserSession (back_populates="user")
-    sessions = relationship("UserSession", back_populates="user")
-    # TODO: add relationship to History (back_populates="user")
-    history = relationship("History", back_populates="user")
+    sessions        = relationship("UserSession", back_populates="user")
+    history         = relationship("History", back_populates="user")
 
 
 class UserSession(Base):
-    __tablename__ = "sessions"
+    __tablename__   = "sessions"
 
-    session_id    = Column(Integer, primary_key=True, autoincrement=True)
-    token         = Column(String(64), unique=True, nullable=False)
-    login_time    = Column(DateTime, default=datetime.utcnow)
-    last_activity = Column(DateTime, default=datetime.utcnow)
+    session_id      = Column(Integer, primary_key=True, autoincrement=True)
+    token           = Column(String(64), unique=True, nullable=False)
+    login_time      = Column(DateTime, default=datetime.utcnow)
+    last_activity   = Column(DateTime, default=datetime.utcnow)
 
-    # TODO: add ForeignKey column user_id → users.user_id
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    # TODO: add relationship back to User (back_populates="sessions")
-    user = relationship("User", back_populates="sessions")
+    user_id         = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    user            = relationship("User", back_populates="sessions")
 
 
 class History(Base):
-    __tablename__ = "history"
+    __tablename__   = "history"
 
-    history_id = Column(Integer, primary_key=True, autoincrement=True)
-    timestamp  = Column(DateTime, default=datetime.utcnow)
-    report     = Column(Text, nullable=True)
+    history_id      = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp       = Column(DateTime, default=datetime.utcnow)
+    report          = Column(Text, nullable=True)
 
-    # TODO: add ForeignKey column user_id → users.user_id
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    # TODO: add ForeignKey column image_id → cxr_cases.image_id (String, nullable=True)
-    image_id = Column(String, ForeignKey("cxr_cases.image_id"), nullable=True)
-    # TODO: add relationship back to User (back_populates="history")
-    user = relationship("User", back_populates="history")
+    user_id         = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    image_id        = Column(String, ForeignKey("cxr_cases.image_id"), nullable=True)
+
+    case_name       = Column(String(100), nullable=True)
+    patient_ref     = Column(String(100), nullable=True)
+    notes           = Column(Text, nullable=True)
+    detections      = Column(Text, nullable=True)
+    heatmaps_dir    = Column(String(255), nullable=True)
+
+    user            = relationship("User", back_populates="history")
 
 
 class CXRCase(Base):
-    __tablename__ = "cxr_cases"
+    __tablename__   = "cxr_cases"
 
     image_id        = Column(String(100), primary_key=True)
     patient_id      = Column(String(50), nullable=False)
     image_path      = Column(String(255), nullable=False)
     pneumonia       = Column(Integer)
     cardiomegaly    = Column(Integer)
-    pleural_effusion = Column(Integer)
+    pleural_effusion= Column(Integer)
     pneumothorax    = Column(Integer)
     atelectasis     = Column(Integer)
     lung_mass       = Column(Integer)
