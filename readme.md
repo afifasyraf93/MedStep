@@ -132,7 +132,7 @@ NIH ChestX-ray dataset (place in data/NIH/)
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/MedStep.git
+git clone https://github.com/afifasyraf93/MedStep.git
 cd MedStep
 
 # Create and activate virtual environment
