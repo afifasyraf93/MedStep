@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+echo "=== Listing /app contents for debugging ==="
+ls -la /app
+echo "=========================================="
+
 echo "Starting backend API..."
 uvicorn backend.api:app --host 0.0.0.0 --port 8000 &
 
