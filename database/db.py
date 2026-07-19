@@ -1,13 +1,18 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey
+import os
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, LargeBinary
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
-DATABASE_URL = "sqlite:///data/medstep.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///data/medstep.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
+SGT = timezone(timedelta(hours=8))
 
 class User(Base):
     __tablename__   = "users"
@@ -17,7 +22,7 @@ class User(Base):
     email           = Column(String(100), unique=True, nullable=False)
     password_hash   = Column(String(255), nullable=False)
     role            = Column(String(20), nullable=False, default="student")
-    created_at      = Column(DateTime, default=datetime.utcnow)
+    created_at      = Column(DateTime, default=lambda: datetime.now(SGT).replace(tzinfo=None))
     analyses_count  = Column(Integer, default=0)
     streak_days     = Column(Integer, default=0)
     last_active     = Column(DateTime, nullable=True)
@@ -31,8 +36,8 @@ class UserSession(Base):
 
     session_id      = Column(Integer, primary_key=True, autoincrement=True)
     token           = Column(String(64), unique=True, nullable=False)
-    login_time      = Column(DateTime, default=datetime.utcnow)
-    last_activity   = Column(DateTime, default=datetime.utcnow)
+    login_time      = Column(DateTime, default=lambda: datetime.now(SGT).replace(tzinfo=None))
+    last_activity   = Column(DateTime, default=lambda: datetime.now(SGT).replace(tzinfo=None))
 
     user_id         = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     user            = relationship("User", back_populates="sessions")
@@ -42,7 +47,7 @@ class History(Base):
     __tablename__   = "history"
 
     history_id      = Column(Integer, primary_key=True, autoincrement=True)
-    timestamp       = Column(DateTime, default=datetime.utcnow)
+    timestamp       = Column(DateTime, default=lambda: datetime.now(SGT).replace(tzinfo=None))
     report          = Column(Text, nullable=True)
 
     user_id         = Column(Integer, ForeignKey("users.user_id"), nullable=False)
@@ -55,6 +60,7 @@ class History(Base):
     heatmaps_dir    = Column(String(255), nullable=True)
 
     user            = relationship("User", back_populates="history")
+    heatmaps        = relationship("Heatmap", back_populates="history")
 
 
 class CXRCase(Base):
@@ -71,6 +77,17 @@ class CXRCase(Base):
     lung_mass       = Column(Integer)
     report_text     = Column(Text, nullable=True)
     embedding_index = Column(Integer, nullable=False, default=0)
+
+
+class Heatmap(Base):
+    __tablename__   = "heatmaps"
+
+    heatmap_id      = Column(Integer, primary_key=True, autoincrement=True)
+    history_id      = Column(Integer, ForeignKey("history.history_id"), nullable=False)
+    pathology       = Column(String(50), nullable=False)
+    image_data      = Column(LargeBinary, nullable=False)
+
+    history         = relationship("History", back_populates="heatmaps")
 
 
 def get_db():

@@ -702,7 +702,7 @@ function renderSimilarCases(cases) {
         container.innerHTML += `
             <div class="col-md-4">
                 <div class="similar-card">
-                    <img src="http://localhost:8000/image?path=${c.path}"
+                    <img src="/data/${c.path.replace(/^.*?data[\\\/]/, '')}"
                          style="cursor:zoom-in;"
                          onclick="openLightbox(this.src)"
                          alt="Similar case" onerror="this.src='/static/img/placeholder.png'">

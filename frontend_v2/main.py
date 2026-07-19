@@ -8,6 +8,7 @@ import os
 
 app = FastAPI()
 
+app.mount("/data", StaticFiles(directory="D:/Projek/MedStep/data"), name="data")
 app.mount("/static", StaticFiles(directory="frontend_v2/static"), name="static")
 templates = Jinja2Templates(directory="frontend_v2/templates")
 
@@ -257,7 +258,7 @@ async def generate_pdf(request: Request):
 
     import sys
     sys.path.append(".")
-    from frontend.utils.pdf_export import generate_pdf_report
+    from frontend_v2.utils.pdf_export import generate_pdf_report
     import base64
 
     # Decode image from base64 sent from frontend
@@ -281,6 +282,25 @@ async def generate_pdf(request: Request):
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=medstep_report.pdf"}
     )
+
+@app.get("/api/image")
+async def proxy_image(path: str):
+    async with httpx.AsyncClient() as client:
+        res = await client.get(f"{API_BASE}/image", params={"path": path})
+    from fastapi.responses import Response
+    return Response(content=res.content, media_type=res.headers.get("content-type", "image/jpeg"))
+
+@app.get("/api/heatmap")
+async def proxy_heatmap(history_id: int, pathology: str):
+    async with httpx.AsyncClient() as client:
+        res = await client.get(f"{API_BASE}/heatmap", params={"history_id": history_id, "pathology": pathology})
+    return Response(content=res.content, media_type="image/png")
+
+@app.get("/api/health")
+async def proxy_health():
+    async with httpx.AsyncClient() as client:
+        res = await client.get(f"{API_BASE}/health")
+    return res.json()
 
 if __name__ == "__main__":
     import uvicorn

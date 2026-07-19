@@ -16,3 +16,4 @@ requests
 scikit-learn
 matplotlib
 opencv-python
+psycopg2-binary

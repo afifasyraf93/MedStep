@@ -1,12 +1,12 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from database.db import User, UserSession
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SESSION_EXPIRE_HOURS = 24
-
+SGT = timezone(timedelta(hours=8))
 
 def register(db: Session, username: str, email: str, password: str):
     """Hash password and insert new User row.
@@ -63,12 +63,12 @@ def verify_session(db: Session, token: str):
         raise ValueError("Invalid Session Token")
     # TODO: check last_activity is within SESSION_EXPIRE_HOURS
     expiry = session.last_activity + timedelta(hours=SESSION_EXPIRE_HOURS)
-    if datetime.utcnow() > expiry:
+    if datetime.now(SGT).replace(tzinfo=None) > expiry:
         db.delete(session)
         db.commit()
         raise ValueError("Invalid Session")
     # TODO: update last_activity to now and commit
-    session.last_activity = datetime.utcnow()
+    session.last_activity = datetime.now(SGT).replace(tzinfo=None)
     # TODO: return session.user_id
     return session.user_id
 

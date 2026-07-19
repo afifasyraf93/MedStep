@@ -193,15 +193,15 @@
         {% endif %}
 
         <!-- Heatmaps -->
-        {% if h.heatmaps_dir %}
+        {% if h.has_heatmaps %}
         <div style="margin-bottom:12px;">
             <div style="font-size:0.82rem; font-weight:600; color:#2C2C2C; margin-bottom:8px;">
                 <i class="fas fa-fire me-1" style="color:#E07B4F;"></i>
                 Grad-CAM Heatmaps
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;"
-                 id="heatmaps_{{ h.history_id }}"
-                 data-dir="{{ h.heatmaps_dir }}">
+                id="heatmaps_{{ h.history_id }}"
+                data-history-id="{{ h.history_id }}">
             </div>
         </div>
         {% endif %}
@@ -272,14 +272,14 @@ function renderHistoryHeatmaps(id) {
     const el = document.getElementById('heatmaps_' + id);
     if (!el || el.children.length > 0) return;
 
-    const dir = el.dataset.dir;
-    if (!dir) return;
+    const historyId = el.dataset.historyId;
+    if (!historyId) return;
 
     const pathologies = ['pneumonia','cardiomegaly','pleural_effusion',
                          'pneumothorax','atelectasis','lung_mass'];
 
     pathologies.forEach(p => {
-        const imgUrl = `http://localhost:8000/heatmap?dir=${encodeURIComponent(dir)}&pathology=${p}`;
+        const imgUrl = `/api/heatmap?history_id=${historyId}&pathology=${p}`;
         const wrapper = document.createElement('div');
         wrapper.style.cssText = 'text-align:center;';
         wrapper.innerHTML = `

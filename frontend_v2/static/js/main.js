@@ -168,7 +168,7 @@ async function checkAPIConnection() {
     `;
     banner.innerHTML = `
         <i class="fas fa-triangle-exclamation"></i>
-        <span>API server is not responding. Please make sure the backend is running on port 8000.</span>
+        <span>Service is temporarily unavailable. Please try again in a moment.</span>
         <button onclick="retryConnection()" style="
             margin-left: 12px;
             padding: 4px 12px;
@@ -183,7 +183,7 @@ async function checkAPIConnection() {
     document.body.appendChild(banner);
 
     try {
-        const res = await fetch('http://localhost:8000/health', {
+        const res = await fetch('/api/health', {
             signal: AbortSignal.timeout(5000)
         });
         if (res.ok) {

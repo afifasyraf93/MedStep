@@ -10,7 +10,8 @@ from PIL import Image
 import io
 import base64
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+SGT = timezone(timedelta(hours=8))
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -20,15 +21,17 @@ from modules.retrieval import load_retrieval_system, retrieve
 from modules.explanation import generate_report
 from fastapi import Depends, Header
 from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from database.db import get_db, init_db
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 import auth.auth as auth
 from database.history import save_history, get_history, delete_history
-from database.db import get_db, init_db, CXRCase, User, History
+from database.db import get_db, init_db, CXRCase, User, History, Heatmap
 from groq import Groq
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
+
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 MODEL_PATH  = "models/combined_densenet121_best.pth"
@@ -135,16 +138,26 @@ async def analyze(request: Request, db: Session = Depends(get_db),
         if token:
             user_id = auth.verify_session(db, token)
 
-            # Save heatmaps to disk FIRST
-            heatmaps_dir = None
+             # Save heatmaps to DB instead of disk
+            history_record = save_history(
+                db,
+                user_id      = user_id,
+                report       = str(report),
+                detections   = json.dumps(detections),
+                heatmaps_dir = None,
+                case_name    = "Second Opinion" if mode == "second_opinion" else None
+            )
+
             if heatmaps:
-                heatmaps_dir = f"uploads/heatmaps/user_{user_id}_{int(datetime.utcnow().timestamp())}"
-                os.makedirs(heatmaps_dir, exist_ok=True)
                 for pathology, b64_str in heatmaps.items():
                     if b64_str:
                         img_bytes = base64.b64decode(b64_str)
-                        with open(f"{heatmaps_dir}/{pathology}.png", "wb") as f:
-                            f.write(img_bytes)
+                        db.add(Heatmap(
+                            history_id=history_record.history_id,
+                            pathology=pathology,
+                            image_data=img_bytes
+                        ))
+                db.commit()
 
             # THEN save history ONCE
             case_name = "Second Opinion" if mode == "second_opinion" else None
@@ -160,7 +173,7 @@ async def analyze(request: Request, db: Session = Depends(get_db),
             # Update progress
             user = db.query(User).filter(User.user_id == user_id).first()
             user.analyses_count = (user.analyses_count or 0) + 1
-            today = datetime.utcnow().date()
+            today = datetime.now(SGT).replace(tzinfo=None).date()
             if user.last_active:
                 last = user.last_active.date()
                 if last == today:
@@ -171,7 +184,7 @@ async def analyze(request: Request, db: Session = Depends(get_db),
                     user.streak_days = 1
             else:
                 user.streak_days = 1
-            user.last_active = datetime.utcnow()
+            user.last_active = datetime.now(SGT).replace(tzinfo=None)
             db.commit()
     except Exception:
         pass
@@ -250,7 +263,7 @@ def history(token: str = Header(...), db: Session = Depends(get_db)):
             "patient_ref": h.patient_ref,
             "notes":       h.notes,
             "detections":  h.detections,
-            "heatmaps_dir": h.heatmaps_dir
+            "has_heatmaps": len(h.heatmaps) > 0
         }
         for h in results
         if not (h.report and h.report.startswith("SECOND_OPINION"))
@@ -302,11 +315,14 @@ def update_history(
     return {"updated": True}    
 
 @app.get("/heatmap")
-def get_heatmap(dir: str, pathology: str):
-    path = os.path.join(dir, f"{pathology}.png")
-    if not os.path.exists(path):
+def get_heatmap(history_id: int, pathology: str, db: Session = Depends(get_db)):
+    record = db.query(Heatmap).filter(
+        Heatmap.history_id == history_id,
+        Heatmap.pathology == pathology
+    ).first()
+    if not record:
         raise HTTPException(status_code=404, detail="Heatmap not found")
-    return FileResponse(path)
+    return Response(content=record.image_data, media_type="image/png")
 
 @app.get("/library")
 def get_library(pathologies: str = "", db: Session = Depends(get_db)):

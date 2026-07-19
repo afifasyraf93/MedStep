@@ -247,7 +247,7 @@ async function loadRelatedCases(pathology) {
             container.innerHTML = top3.map(c => `
                 <div>
                     <img class="related-case-img"
-                         src="http://localhost:8000/image?path=${c.image_path}"
+                         src="/data/${c.image_path}"
                          alt="Related case"
                          onclick="openLightbox(this.src)">
                     <div style="font-size:0.78rem; color:#6B6B6B; margin-top:6px;">
